@@ -1,0 +1,29 @@
+{
+  "$schema": "schemas/v1.json",
+  "id": "dcd3a42a-f362-47a9-af2f-162357a8658e",
+  "name": "Envy",
+  "version": 2,
+  "checksum": "1e163fc9ee5890a6989d18eb8143b0102731aeb4730586b891a7bebe3bce78a6",
+  "schemas": {
+    "development": {
+      "FILE_NAME": {
+        "type": "string",
+        "default": "envy.json"
+      },
+      "SCHEMA_PATH": {
+        "type": "string",
+        "default": "./schemas/v1.json"
+      }
+    },
+    "production": {
+      "FILE_NAME": {
+        "type": "string",
+        "default": "envy.json"
+      },
+      "SCHEMA_PATH": {
+        "type": "string",
+        "default": "https://raw.githubusercontent.com/carvalinh0/envy/main/schemas/v1.json"
+      }
+    }
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": ".envy schema version 1",
+  "type": "object",
+  "required": ["id", "name", "version", "checksum", "schemas"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "URL or path to the JSON Schema."
+    },
+    "id": {
+      "type": "string",
+      "title": "Id of the project (DO NOT CHANGE!)"
+    },
+    "name": {
+      "type": "string",
+      "title": "Name of the project"
+    },
+    "version": {
+      "type": "integer",
+      "default": 1,
+      "minimum": 1,
+      "title": "The version of the schema (DO NOT CHANGE!)"
+    },
+    "checksum": {
+      "type": "string",
+      "title": "The checksum of the schema (DO NOT CHANGE!)"
+    },
+    "workspace": {
+      "type": "object",
+      "title": "Makes this manifest the root of a monorepo",
+      "required": ["members"],
+      "additionalProperties": false,
+      "properties": {
+        "members": {
+          "type": "array",
+          "title": "Projects that inherit the environments and variables of this manifest",
+          "description": "Paths relative to this file, with '/' separators. '*' and '?' match inside a folder name, '**' matches any number of folders (e.g. \"services/*\").",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "not": { "anyOf": [{ "pattern": "^/" }, { "pattern": "(^|/)\\.\\.(/|$)" }] }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "type": "object",
+      "title": "Your environments configuration",
+      "propertyNames": {
+        "minLength": 1,
+        "description": "Environment names cannot be empty."
+      },
+      "additionalProperties": {
+        "type": "object",
+        "propertyNames": {
+          "minLength": 1,
+          "description": "Variable names cannot be empty."
+        },
+        "additionalProperties": {
+          "$ref": "#/$defs/envVarConfig"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "envVarConfig": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Default values cannot be empty.",
+          "$comment": "The value itself"
+        },
+        "type": {
+          "type": "string",
+          "$comment": "The type of the value",
+          "enum": [
+            "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "u128", "f32", "f64", "ip",
+            "url", "port", "uuid", "base64", "string", "boolean", "iso", "cron", "secret"
+          ]
+        }
+      }
+    }
+  }
+}
