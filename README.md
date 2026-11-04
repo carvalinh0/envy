@@ -21,7 +21,7 @@ The values live in your operating system's keyring (Secret Service on Linux, Key
 | Environment | Supported | Version |
 | :---------- | :-------: | :-----: |
 | Linux | ✅ | All |
-| Windows | ✅ | ^1.1.0 |
+| Windows | ✅ | ^2.0.0 |
 | MacOS | ❌ | None yet |
 | Docker containers | ❌ | None yet |
 

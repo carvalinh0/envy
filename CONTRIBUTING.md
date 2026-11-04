@@ -42,6 +42,8 @@ The `main` branch is tagged automatically from the commit message (`.github/work
 | `feat: ...` | Minor |
 | `fix: ...` or anything else | Patch |
 
+The tag action looks for `feat!:` and `feat:` **anywhere** in the messages of every commit pushed since the last tag, body included. Never write those strings in a commit body (not even quoted), or the push gets a bigger bump than intended.
+
 ## Architecture
 
 Commands depend on abstractions, never on the operating system directly (SOLID):
