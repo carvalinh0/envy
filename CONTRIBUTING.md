@@ -30,6 +30,8 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
+The same checks run on Linux and Windows for every pull request and every branch other than `main` (`.github/workflows/ci.yml`). On `main`, `release.yml` runs them again and only creates the tag when they pass.
+
 Every change needs tests: **unit tests** next to the code for logic, and **integration tests** in `tests/` for behaviour of commands. A bug fix starts with a failing test.
 
 ## Commit messages

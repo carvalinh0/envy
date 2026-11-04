@@ -49,6 +49,8 @@ jobs:
         run: cargo test --all-targets
 
   tag:
+    # No tag is created unless every test passes.
+    needs: test
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
