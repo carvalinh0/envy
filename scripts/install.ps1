@@ -17,8 +17,6 @@ $Repo = if ($env:ENVY_REPO) { $env:ENVY_REPO } else { "carvalinh0/envy" }
 $GithubUrl = if ($env:ENVY_GITHUB_URL) { $env:ENVY_GITHUB_URL } else { "https://github.com" }
 $InstallDir = if ($env:ENVY_INSTALL_DIR) { $env:ENVY_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "envy\bin" }
 
-Write-Warning "Windows is not tested yet."
-
 function Install-WithCargo {
     if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { return $false }
 

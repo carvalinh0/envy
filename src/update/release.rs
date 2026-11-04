@@ -1,6 +1,6 @@
 //! Where releases come from and how their files are named.
 //!
-//! The asset names must match the ones produced by `.github/workflows/bump_version.yml`:
+//! The asset names must match the ones produced by `.github/workflows/release.yml`:
 //! `envy-<tag>-<target>.tar.gz` (or `.zip` on Windows).
 
 use std::time::Duration;

@@ -34,7 +34,7 @@ Every change needs tests: **unit tests** next to the code for logic, and **integ
 
 ## Commit messages
 
-The `main` branch is tagged automatically from the commit message (`.github/workflows/bump_version.yml`):
+The `main` branch is tagged automatically from the commit message (`.github/workflows/release.yml`):
 
 | Message | Bump |
 | :-- | :-- |

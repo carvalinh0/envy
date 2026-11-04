@@ -65,14 +65,21 @@ impl Context<'_> {
         Ok(())
     }
 
-    /// `path` relative to the directory Envy was started in, when it is inside it.
+    /// `path` relative to the directory Envy was started in, when it is inside it. Always
+    /// with `/` separators, like the `workspace.members` patterns.
     pub fn display_path(&self, path: &Path) -> String {
-        path.strip_prefix(&self.config.start_dir)
+        let shown = path
+            .strip_prefix(&self.config.start_dir)
             .ok()
             .filter(|relative| !relative.as_os_str().is_empty())
             .unwrap_or(path)
             .display()
-            .to_string()
+            .to_string();
+        if cfg!(windows) {
+            shown.replace('\\', "/")
+        } else {
+            shown
+        }
     }
 
     pub fn save_envy(&self, envy: &Envy) -> Result<()> {

@@ -21,12 +21,13 @@ The values live in your operating system's keyring (Secret Service on Linux, Key
 | Environment | Supported | Version |
 | :---------- | :-------: | :-----: |
 | Linux | ✅ | All |
-| Windows | ❌ | ^1.0.0 |
+| Windows | ✅ | ^1.1.0 |
 | MacOS | ❌ | None yet |
 | Docker containers | ❌ | None yet |
 
-> The keyring backends for macOS and Windows are compiled in, but only Linux is tested for now.
+> Linux and Windows are tested in CI. The macOS keyring backend is compiled in, but not tested yet.
 > On Linux you need a running Secret Service (GNOME Keyring, KeePassXC, ...) and `libdbus` to build from source.
+> On Windows the values live in the Credential Manager, which limits each value to 2560 bytes.
 
 ## How to install
 
@@ -56,7 +57,7 @@ cargo install dot-envy
 
 The install scripts use `cargo install dot-envy` when Cargo is available and fall back to the prebuilt binary of the latest GitHub release when it is not (or when `cargo install` fails). The binary is copied to `~/.local/bin` (Linux/macOS) or `%LOCALAPPDATA%\envy\bin` (Windows); set `ENVY_INSTALL_DIR` to change it and `ENVY_VERSION` to pin a release (e.g. `v1.2.3`). Building with Cargo needs Rust **1.89 or newer**. The installed binary is called `envy`.
 
-> Prebuilt binaries are currently published for Linux x86_64 only; they need `libdbus-1` at runtime (`sudo apt install libdbus-1-3`) and a running Secret Service.
+> Prebuilt binaries are published for Linux x86_64 and Windows x86_64. The Linux one needs `libdbus-1` at runtime (`sudo apt install libdbus-1-3`) and a running Secret Service.
 
 ## Configuration
 
@@ -243,7 +244,7 @@ envy update
 
 `envy version` also checks, once per run, whether a newer release exists and prints a hint. The check is best effort (being offline is silently ignored), only happens in `envy version` and can be disabled with `ENVY_NO_UPDATE_CHECK=1`. Both commands read `github.com/carvalinh0/envy/releases/latest` and trust your operating system's certificate store.
 
-> Prebuilt binaries are published for Linux x86_64 for now; on other platforms `envy update` only works for Cargo installs.
+> Prebuilt binaries are published for Linux x86_64 and Windows x86_64; on other platforms `envy update` only works for Cargo installs.
 
 ## Explaining the envy.json Manifest File
 
