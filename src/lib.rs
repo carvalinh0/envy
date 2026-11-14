@@ -14,6 +14,7 @@ pub mod context;
 pub mod dotenv;
 pub mod envy;
 pub mod inference;
+pub mod mnemonic;
 pub mod prompt;
 pub mod protect;
 pub mod resolver;
