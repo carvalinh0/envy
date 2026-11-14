@@ -11,6 +11,7 @@ use aes_gcm::{
 };
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::STANDARD};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
@@ -29,6 +30,10 @@ pub struct Bundle {
     pub project_name: String,
     pub scope: String,
     pub entries: BundleEntries,
+    /// `envy import` refuses the bundle after this moment. It travels inside the encrypted
+    /// payload, so it cannot be changed without the key; releases before it ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
 impl Bundle {
@@ -160,7 +165,21 @@ mod tests {
             project_name: "My Project".into(),
             scope: "dev".into(),
             entries,
+            expires_at: None,
         }
+    }
+
+    #[test]
+    fn bundles_without_an_expiry_keep_the_old_shape() {
+        let json = serde_json::to_string(&sample()).unwrap();
+        assert!(!json.contains("expires_at"), "{json}");
+
+        // The payload of a bundle exported before the expiry existed.
+        let old =
+            r#"{"project_id":"id-1","project_name":"P","scope":"all","entries":{"dev":{"K":"v"}}}"#;
+        let bundle: Bundle = serde_json::from_str(old).unwrap();
+        assert_eq!(bundle.expires_at, None);
+        assert_eq!(bundle.value_count(), 1);
     }
 
     #[test]

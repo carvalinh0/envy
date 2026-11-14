@@ -6,6 +6,7 @@ use zeroize::Zeroizing;
 use crate::{
     bundle::{ALL_SCOPE, Bundle, BundleEntries},
     cli::ExportArgs,
+    clock,
     context::Context,
     envy::GLOBAL_ENV,
     vault::SecretVault,
@@ -13,6 +14,10 @@ use crate::{
 
 pub fn run(ctx: &Context, args: &ExportArgs, out: &mut dyn Write) -> Result<()> {
     let envy = ctx.load_envy()?;
+    let expires_at = match &args.ttl {
+        Some(ttl) => Some(ctx.clock.now() + clock::parse_duration(ttl)?),
+        None => None,
+    };
 
     let (scope, environments): (String, Vec<String>) = match &args.environment {
         Some(name) => {
@@ -52,6 +57,7 @@ pub fn run(ctx: &Context, args: &ExportArgs, out: &mut dyn Write) -> Result<()> 
         project_name: envy.name.clone(),
         scope,
         entries,
+        expires_at,
     };
     if bundle.value_count() == 0 {
         bail!("There are no values in the vault to export.");
@@ -87,5 +93,12 @@ pub fn run(ctx: &Context, args: &ExportArgs, out: &mut dyn Write) -> Result<()> 
         "Key (shown only once, share it through a different channel): {}",
         key.as_str()
     )?;
+    if let Some(expires_at) = bundle.expires_at {
+        writeln!(
+            out,
+            "It can be imported until {}.",
+            expires_at.format("%Y-%m-%d %H:%M UTC")
+        )?;
+    }
     Ok(())
 }
