@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod audit;
+pub mod backends;
 pub mod bundle;
 pub mod cli;
 pub mod clock;

@@ -6,7 +6,9 @@ use std::{
     cell::{Cell, RefCell},
     collections::{BTreeMap, VecDeque},
     fs,
+    io::Write,
     path::PathBuf,
+    rc::Rc,
 };
 
 use anyhow::{Result, anyhow};
@@ -15,6 +17,7 @@ use clap::Parser;
 use dot_envy::{
     app,
     audit::{AuditEvent, AuditLog, FileAudit},
+    backends::{Backends, FileBackends},
     bundle::AesGcmCodec,
     cli::Cli,
     clock::Clock,
@@ -22,16 +25,20 @@ use dot_envy::{
     context::Context,
     envy::{Envy, GLOBAL_ENV, Schema, VarDetail},
     inference::HeuristicInferrer,
+    keys::KdfParams,
     prompt::Prompter,
     runner::ProcessRunner,
     schema::Secret,
     state::FileState,
     update::{ReleaseSource, SelfUpdater, UpdateMethod},
-    vault::{Change, DEFAULT_KEEP, MemoryVault, SecretVault},
+    vault::{Change, DEFAULT_KEEP, EncryptedFileVault, MemoryVault, SecretVault},
 };
 use tempfile::TempDir;
 
 pub const PROJECT_ID: &str = "proj-1";
+
+/// Argon2id parameters cheap enough for tests. They are stored in the vault file.
+pub const FAST_KDF: KdfParams = KdfParams { m: 64, t: 1, p: 1 };
 
 /// A write for tests that store values directly in the vault.
 pub const CHANGE: Change = Change {
@@ -62,10 +69,52 @@ impl Clock for FakeClock {
     }
 }
 
+/// Everything a command printed so far, shared with the prompter.
+#[derive(Clone, Default)]
+pub struct Transcript(Rc<RefCell<Vec<u8>>>);
+
+impl Write for Transcript {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.borrow_mut().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Transcript {
+    fn text(&self) -> String {
+        String::from_utf8(self.0.borrow().clone()).unwrap()
+    }
+}
+
+/// The words of the last recovery key printed, as `  1. word      2. word ...`.
+pub fn recovery_words(output: &str) -> Vec<String> {
+    let start = output
+        .rfind("Recovery key:")
+        .expect("a recovery key was printed");
+    let tokens: Vec<&str> = output[start..].split_whitespace().collect();
+    tokens
+        .windows(2)
+        .filter(|pair| {
+            pair[0].ends_with('.') && pair[0].trim_end_matches('.').parse::<usize>().is_ok()
+        })
+        .map(|pair| pair[1].to_string())
+        .take(24)
+        .collect()
+}
+
 #[derive(Default)]
 pub struct FakePrompter {
     answers: RefCell<VecDeque<String>>,
     pub asked: RefCell<Vec<String>>,
+    /// The output of the running command: "Word #N of the recovery key" is answered from it,
+    /// like a user reading the words on screen.
+    transcript: RefCell<Option<Transcript>>,
+    /// Answers the recovery words wrongly, like a user who did not write them down.
+    pub misremember_words: Cell<bool>,
 }
 
 impl FakePrompter {
@@ -79,6 +128,18 @@ impl FakePrompter {
 impl Prompter for FakePrompter {
     fn ask_secret(&self, label: &str) -> Result<Secret> {
         self.asked.borrow_mut().push(label.to_string());
+        if let Some(position) = label
+            .strip_prefix("Word #")
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|n| n.parse::<usize>().ok())
+        {
+            let shown = self.transcript.borrow().as_ref().map(Transcript::text);
+            let words = recovery_words(&shown.unwrap_or_default());
+            if self.misremember_words.get() {
+                return Ok(Secret::new("not-a-word"));
+            }
+            return Ok(Secret::new(words[position - 1].clone()));
+        }
         let answer = self
             .answers
             .borrow_mut()
@@ -254,9 +315,24 @@ impl Harness {
             Err(err) => return (Err(anyhow!("{err}")), String::new()),
         };
 
+        // Like a new process: the file vault and the backend choices are read again.
+        let file = EncryptedFileVault::new(
+            Some(self.data_dir()),
+            &self.prompter,
+            self.config.vault_password.as_ref(),
+        )
+        .with_kdf(FAST_KDF);
+        let choices = FileBackends::new(Some(self.data_dir()));
+        let backends = Backends {
+            keyring: &self.vault,
+            file: &file,
+            choices: &choices,
+            forced: cli.backend,
+        };
         let ctx = Context {
             config: &self.config,
-            vault: &self.vault,
+            vault: &backends,
+            backends: &backends,
             state: &self.state,
             prompter: &self.prompter,
             runner: &self.runner,
@@ -268,9 +344,11 @@ impl Harness {
             audit: &self.audit,
         };
 
-        let mut out = Vec::new();
+        let mut out = Transcript::default();
+        *self.prompter.transcript.borrow_mut() = Some(out.clone());
         let result = app::dispatch(cli.command, &ctx, &mut out);
-        (result, String::from_utf8(out).unwrap())
+        *self.prompter.transcript.borrow_mut() = None;
+        (result, out.text())
     }
 
     pub fn ok(&self, args: &[&str]) -> String {
@@ -288,6 +366,11 @@ impl Harness {
             ),
             Err(err) => format!("{err:#}"),
         }
+    }
+
+    /// The user's data folder: hidden, so `check -r` and the `.env` scan never see it.
+    pub fn data_dir(&self) -> PathBuf {
+        self.dir.path().join(".envy-data")
     }
 
     pub fn path(&self, name: &str) -> PathBuf {
