@@ -144,7 +144,7 @@ fn digest(line: &str) -> String {
 
 /// The project id is a UUID, but a hand-edited manifest may hold anything, and the id must
 /// never escape the audit folder.
-fn file_stem(project: &str) -> String {
+pub(crate) fn file_stem(project: &str) -> String {
     let plain = !project.is_empty()
         && project
             .chars()
