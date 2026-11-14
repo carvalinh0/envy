@@ -57,6 +57,8 @@ fn help_lists_every_command_of_the_readme() {
         "audit",
         "protect",
         "unprotect",
+        "migrate",
+        "vault",
     ] {
         assert!(
             out.lines().any(|l| l.trim_start().starts_with(command)),
@@ -250,7 +252,7 @@ fn the_project_is_found_from_a_subdirectory_and_with_dash_c() {
 }
 
 #[test]
-fn an_unavailable_backend_fails_only_when_values_are_needed() {
+fn a_backend_without_values_fails_only_when_values_are_needed() {
     let dir = tempfile::tempdir().unwrap();
     // `up` only fixes the checksum, so the manifest needs no keyring to be valid.
     std::fs::write(
@@ -276,12 +278,17 @@ fn an_unavailable_backend_fails_only_when_values_are_needed() {
         .stderr(predicate::str::contains(
             "The remote backend is not available in this version",
         ));
+    // The data folder is a temporary one, so the user's real vaults are never read.
+    let data = tempfile::tempdir().unwrap();
     envy(&dir)
+        .env("XDG_DATA_HOME", data.path())
+        .env("LOCALAPPDATA", data.path())
+        .env("HOME", data.path())
         .args(["--backend", "file", "ls", "dev"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "The file backend is not available",
+            "This project has no file vault on this machine yet. Run `envy migrate --to file`.",
         ));
     envy(&dir)
         .env("ENVY_BACKEND", "s3")

@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use serde::{Deserialize, Serialize};
 
 /// Validate, edit and securely share environment variables
 #[derive(Debug, Parser)]
@@ -19,32 +20,41 @@ pub struct Cli {
     pub command: Commands,
 }
 
-/// Storage of the values. Only the keyring exists so far; the others are reserved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+/// Storage of the values. The remote backend is reserved for the Envy server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Backend {
     /// The operating system keyring
     Keyring,
-    /// An encrypted file (not available yet)
+    /// An encrypted file in your data folder
     File,
     /// An Envy server (not available yet)
     Remote,
 }
 
 impl Backend {
-    /// The flag wins, then `ENVY_BACKEND`, then the keyring. Nothing configured behaves
-    /// exactly like the releases before backends could be chosen.
-    pub fn resolve(flag: Option<Backend>, from_env: Option<&str>) -> Result<Backend> {
-        if let Some(backend) = flag {
-            return Ok(backend);
+    /// The backend forced for every project: the flag, then `ENVY_BACKEND`. `None` lets
+    /// each project use the backend the user chose for it (the keyring by default).
+    pub fn forced(flag: Option<Backend>, from_env: Option<&str>) -> Result<Option<Backend>> {
+        if flag.is_some() {
+            return Ok(flag);
         }
         match from_env.filter(|value| !value.is_empty()) {
-            None => Ok(Backend::Keyring),
+            None => Ok(None),
             Some(value) => match Backend::from_str(value, true) {
-                Ok(backend) => Ok(backend),
+                Ok(backend) => Ok(Some(backend)),
                 Err(_) => {
                     bail!("ENVY_BACKEND='{value}' is not valid. Use keyring, file or remote.")
                 }
             },
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Backend::Keyring => "keyring",
+            Backend::File => "file",
+            Backend::Remote => "remote",
         }
     }
 }
@@ -116,6 +126,12 @@ pub enum Commands {
 
     /// Remove the password of an environment and decrypt the values stored for it
     Unprotect(ProtectArgs),
+
+    /// Move this project's values and their history to another backend
+    Migrate(MigrateArgs),
+
+    /// Manage the encrypted file vault of this project
+    Vault(VaultArgs),
 }
 
 #[derive(Debug, Args)]
@@ -255,6 +271,34 @@ pub struct ProtectArgs {
     pub environment: String,
 }
 
+#[derive(Debug, Args)]
+pub struct MigrateArgs {
+    /// Backend that will hold the values
+    #[arg(long, value_enum)]
+    pub to: Backend,
+    /// Delete the values from the current backend once they are copied and checked
+    #[arg(long)]
+    pub remove_source: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct VaultArgs {
+    #[command(subcommand)]
+    pub action: VaultAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum VaultAction {
+    /// Change the password of the file vault
+    Password,
+    /// Encrypt an environment again with a new key
+    Rekey { environment: String },
+    /// Set a new password with the recovery key
+    Recover,
+    /// Replace the recovery key (the old one stops working)
+    RecoveryKey,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,24 +306,24 @@ mod tests {
     #[test]
     fn the_flag_wins_over_the_environment_variable() {
         assert_eq!(
-            Backend::resolve(Some(Backend::File), Some("remote")).unwrap(),
-            Backend::File
+            Backend::forced(Some(Backend::File), Some("remote")).unwrap(),
+            Some(Backend::File)
         );
         assert_eq!(
-            Backend::resolve(None, Some("Remote")).unwrap(),
-            Backend::Remote
+            Backend::forced(None, Some("Remote")).unwrap(),
+            Some(Backend::Remote)
         );
     }
 
     #[test]
-    fn nothing_configured_means_the_keyring() {
-        assert_eq!(Backend::resolve(None, None).unwrap(), Backend::Keyring);
-        assert_eq!(Backend::resolve(None, Some("")).unwrap(), Backend::Keyring);
+    fn nothing_configured_forces_nothing() {
+        assert_eq!(Backend::forced(None, None).unwrap(), None);
+        assert_eq!(Backend::forced(None, Some("")).unwrap(), None);
     }
 
     #[test]
     fn an_unknown_backend_is_an_error() {
-        let err = Backend::resolve(None, Some("s3")).unwrap_err().to_string();
+        let err = Backend::forced(None, Some("s3")).unwrap_err().to_string();
         assert!(err.contains("ENVY_BACKEND='s3'"), "{err}");
     }
 }

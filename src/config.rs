@@ -37,6 +37,8 @@ pub struct Config {
     /// The user's Envy data folder, outside every repository (holds the audit logs). `None`
     /// when no home folder can be found, which disables auditing.
     pub data_dir: Option<PathBuf>,
+    /// Password of the file vault, for non-interactive runs (`ENVY_VAULT_PASSWORD`).
+    pub vault_password: Option<Secret>,
     /// Password of protected environments, for non-interactive runs (`ENVY_PROTECT_PASSWORD`).
     pub protect_password: Option<Secret>,
 }
@@ -52,6 +54,7 @@ impl Config {
             update_notice: true,
             user: UNKNOWN_USER.to_string(),
             data_dir: None,
+            vault_password: None,
             protect_password: None,
         }
     }
@@ -88,6 +91,7 @@ impl Config {
             .or_else(|| var("USERNAME"))
             .unwrap_or_else(|| UNKNOWN_USER.to_string());
         config.data_dir = data_dir(var);
+        config.vault_password = var("ENVY_VAULT_PASSWORD").map(Secret::new);
         config.protect_password = var("ENVY_PROTECT_PASSWORD").map(Secret::new);
         Ok(config)
     }

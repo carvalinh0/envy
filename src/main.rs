@@ -3,6 +3,7 @@ use clap::Parser;
 use dot_envy::{
     app,
     audit::FileAudit,
+    backends::{Backends, FileBackends},
     bundle::AesGcmCodec,
     cli::{Backend, Cli, Commands},
     clock::SystemClock,
@@ -13,7 +14,7 @@ use dot_envy::{
     runner::SystemRunner,
     state::FileState,
     update::{GithubReleases, SystemUpdater},
-    vault::{KeyringVault, SecretVault, UnavailableVault},
+    vault::{EncryptedFileVault, KeyringVault},
 };
 
 fn main() {
@@ -37,11 +38,19 @@ fn execute(cli: Cli) -> anyhow::Result<i32> {
         Commands::Init(_) => config,
         _ => config.discover(),
     };
-    let backend = Backend::resolve(cli.backend, std::env::var("ENVY_BACKEND").ok().as_deref())?;
-    let vault: Box<dyn SecretVault> = match backend {
-        Backend::Keyring => Box::new(KeyringVault::default()),
-        Backend::File => Box::new(UnavailableVault { backend: "file" }),
-        Backend::Remote => Box::new(UnavailableVault { backend: "remote" }),
+    let forced = Backend::forced(cli.backend, std::env::var("ENVY_BACKEND").ok().as_deref())?;
+    let keyring = KeyringVault::default();
+    let file = EncryptedFileVault::new(
+        config.data_dir.clone(),
+        &TerminalPrompter,
+        config.vault_password.as_ref(),
+    );
+    let choices = FileBackends::new(config.data_dir.clone());
+    let backends = Backends {
+        keyring: &keyring,
+        file: &file,
+        choices: &choices,
+        forced,
     };
     let audit = FileAudit::new(config.data_dir.clone());
     let state = FileState::new(config.state_path());
@@ -49,7 +58,8 @@ fn execute(cli: Cli) -> anyhow::Result<i32> {
     let updater = SystemUpdater::from_environment(&SystemRunner);
     let ctx = Context {
         config: &config,
-        vault: vault.as_ref(),
+        vault: &backends,
+        backends: &backends,
         state: &state,
         prompter: &TerminalPrompter,
         runner: &SystemRunner,

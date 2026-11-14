@@ -30,6 +30,8 @@ pub fn dispatch(command: Commands, ctx: &Context, out: &mut dyn Write) -> Result
         Commands::Audit => commands::audit::run(ctx, out)?,
         Commands::Protect(args) => commands::protect::run(ctx, &args, out)?,
         Commands::Unprotect(args) => commands::unprotect::run(ctx, &args, out)?,
+        Commands::Migrate(args) => commands::migrate::run(ctx, &args, out)?,
+        Commands::Vault(args) => commands::vault::run(ctx, &args, out)?,
     }
     Ok(0)
 }

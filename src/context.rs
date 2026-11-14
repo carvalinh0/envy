@@ -6,6 +6,7 @@ use anyhow::{Result, anyhow, bail};
 
 use crate::{
     audit::{AuditEvent, AuditLog},
+    backends::Backends,
     bundle::BundleCodec,
     clock::Clock,
     config::Config,
@@ -25,6 +26,8 @@ pub struct Context<'a> {
     /// The raw vault: sealed values of protected environments come out as they are stored.
     /// Use [`Context::secrets`] whenever values are read or written for the user.
     pub vault: &'a dyn SecretVault,
+    /// The same vault seen as its backends, for the commands that move values between them.
+    pub backends: &'a Backends<'a>,
     pub state: &'a dyn StateStore,
     pub prompter: &'a dyn Prompter,
     pub runner: &'a dyn ProcessRunner,
