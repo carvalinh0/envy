@@ -5,7 +5,7 @@ mod common;
 
 use std::fs;
 
-use common::{Harness, PROJECT_ID, sample_envy, var};
+use common::{CHANGE, Harness, PROJECT_ID, sample_envy, var};
 use dot_envy::{
     envy::{Envy, GLOBAL_ENV, Schema, WorkspaceConfig},
     schema::Secret,
@@ -223,7 +223,7 @@ fn up_and_check_warn_about_a_copied_manifest() {
     )
     .unwrap();
     h.vault
-        .set(API_ID, "dev", "API_TOKEN", &Secret::new("tok"))
+        .set(API_ID, "dev", "API_TOKEN", &Secret::new("tok"), CHANGE)
         .unwrap();
 
     h.cd("services/api");
@@ -259,7 +259,7 @@ fn recursive_check_reports_every_project() {
     h.ok(&["set", "dev", "DATABASE_URL", "postgres://root/db"]);
     h.ok(&["set", "prod", "DATABASE_URL", "postgres://prod/db"]);
     h.vault
-        .set(API_ID, "dev", "API_TOKEN", &Secret::new("tok"))
+        .set(API_ID, "dev", "API_TOKEN", &Secret::new("tok"), CHANGE)
         .unwrap();
 
     let (result, out) = h.run_output(&["check", "-r"]);
@@ -303,10 +303,11 @@ fn recursive_check_fails_on_duplicated_ids() {
             "dev",
             "DATABASE_URL",
             &Secret::new("postgres://x/db"),
+            CHANGE,
         )
         .unwrap();
     h.vault
-        .set(PROJECT_ID, "dev", "API_TOKEN", &Secret::new("t"))
+        .set(PROJECT_ID, "dev", "API_TOKEN", &Secret::new("t"), CHANGE)
         .unwrap();
     h.vault
         .set(
@@ -314,10 +315,11 @@ fn recursive_check_fails_on_duplicated_ids() {
             "prod",
             "DATABASE_URL",
             &Secret::new("postgres://y/db"),
+            CHANGE,
         )
         .unwrap();
     h.vault
-        .set(PROJECT_ID, "prod", "API_TOKEN", &Secret::new("t"))
+        .set(PROJECT_ID, "prod", "API_TOKEN", &Secret::new("t"), CHANGE)
         .unwrap();
 
     let err = h.err(&["check", "-r"]);

@@ -4,6 +4,7 @@ use dot_envy::{
     app,
     bundle::AesGcmCodec,
     cli::{Cli, Commands},
+    clock::SystemClock,
     config::Config,
     context::Context,
     inference::HeuristicInferrer,
@@ -49,6 +50,7 @@ fn execute(cli: Cli) -> anyhow::Result<i32> {
         inferrer: &HeuristicInferrer,
         releases: &releases,
         updater: &updater,
+        clock: &SystemClock,
     };
 
     app::dispatch(cli.command, &ctx, &mut std::io::stdout())

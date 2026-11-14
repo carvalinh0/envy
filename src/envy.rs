@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use uuid::Uuid;
 
-use crate::schema::EnvironmentTypes;
+use crate::{
+    schema::EnvironmentTypes,
+    vault::{DEFAULT_KEEP, MAX_KEEP},
+};
 
 /// Environment whose variables are shared by every other environment.
 pub const GLOBAL_ENV: &str = "global";
@@ -19,6 +22,12 @@ pub struct VarDetail {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<String>,
+}
+
+/// How many older values of each variable the vault keeps (for `envy rollback`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryConfig {
+    pub keep: usize,
 }
 
 pub type Schema = BTreeMap<String, VarDetail>;
@@ -41,10 +50,25 @@ pub struct Envy {
     pub checksum: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<WorkspaceConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<HistoryConfig>,
     pub schemas: BTreeMap<String, Schema>,
     /// Workspace root this project inherits from. Found at runtime, never written to disk.
     #[serde(skip)]
     pub parent: Option<Box<Envy>>,
+}
+
+/// Top-level keys added after the first release. They are hashed only when one of them is
+/// present (see [`Envy::compute_checksum`]).
+#[derive(Serialize)]
+struct LaterKeys<'a> {
+    history: &'a Option<HistoryConfig>,
+}
+
+impl LaterKeys<'_> {
+    fn is_empty(&self) -> bool {
+        self.history.is_none()
+    }
 }
 
 impl Envy {
@@ -56,6 +80,7 @@ impl Envy {
             version: 1,
             checksum: String::new(),
             workspace: None,
+            history: None,
             schemas: BTreeMap::new(),
             parent: None,
         };
@@ -87,11 +112,15 @@ impl Envy {
             &self.version,
             &self.schemas,
         );
-        // Manifests without a workspace hash exactly as before the field existed, so their
-        // checksums stay valid.
-        let bytes = match &self.workspace {
-            None => serde_json::to_vec(&base)?,
-            Some(workspace) => serde_json::to_vec(&(base, workspace))?,
+        // A key that was added later is only hashed when it is present, so manifests that
+        // do not use it keep the checksum they always had.
+        let later = LaterKeys {
+            history: &self.history,
+        };
+        let bytes = match (&self.workspace, later.is_empty()) {
+            (None, true) => serde_json::to_vec(&base)?,
+            (Some(workspace), true) => serde_json::to_vec(&(base, workspace))?,
+            (workspace, false) => serde_json::to_vec(&(base, workspace, later))?,
         };
 
         let digest = Sha3_256::digest(&bytes);
@@ -118,6 +147,11 @@ impl Envy {
         }
         self.commit_change()?;
         Ok(true)
+    }
+
+    /// Versions of each value the vault keeps.
+    pub fn history_keep(&self) -> usize {
+        self.history.map_or(DEFAULT_KEEP, |history| history.keep)
     }
 
     /// Whether the environment is declared here or inherited from the workspace root.
@@ -249,6 +283,7 @@ impl Envy {
         if let Some(workspace) = &self.workspace {
             Self::check_workspace(workspace)?;
         }
+        self.check_later_keys()?;
 
         let envs_to_check: Vec<(&String, &Schema)> = match environment {
             Some(env_name) => match self.schemas.get_key_value(env_name) {
@@ -278,6 +313,13 @@ impl Envy {
             }
         }
 
+        Ok(())
+    }
+
+    fn check_later_keys(&self) -> Result<()> {
+        if self.history_keep() > MAX_KEEP {
+            bail!("history.keep can be at most {MAX_KEEP}.");
+        }
         Ok(())
     }
 
@@ -370,6 +412,7 @@ mod tests {
             version,
             checksum: checksum.to_string(),
             workspace: None,
+            history: None,
             schemas: BTreeMap::new(),
             parent: None,
         }

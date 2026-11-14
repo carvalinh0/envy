@@ -66,6 +66,12 @@ pub enum Commands {
     /// List the project's variables (values are masked by default)
     #[command(name = "ls", visible_alias = "list")]
     List(ListArgs),
+
+    /// Show the stored versions of a variable (values are never printed)
+    History(HistoryArgs),
+
+    /// Restore an earlier version of a variable (the current value stays in the history)
+    Rollback(RollbackArgs),
 }
 
 #[derive(Debug, Args)]
@@ -176,4 +182,23 @@ pub struct ListArgs {
     /// Print the real values instead of masking them
     #[arg(long)]
     pub show: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct HistoryArgs {
+    pub secret: String,
+    /// Environment where the variable lives (defaults to the active one)
+    #[arg(long = "in")]
+    pub environment: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct RollbackArgs {
+    pub secret: String,
+    /// Environment where the variable lives (defaults to the active one)
+    #[arg(long = "in")]
+    pub environment: Option<String>,
+    /// Version to restore (defaults to the one before the active value)
+    #[arg(long)]
+    pub to: Option<u32>,
 }

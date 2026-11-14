@@ -76,8 +76,13 @@ pub fn run(ctx: &Context, args: &InitArgs, out: &mut dyn Write) -> Result<()> {
     let mut stored = 0usize;
     for (environment, pairs) in &to_store {
         for (key, value) in pairs.iter().filter(|(_, v)| !v.is_empty()) {
-            ctx.vault
-                .set(&envy.id, environment, key, &Secret::new(value.clone()))?;
+            ctx.vault.set(
+                &envy.id,
+                environment,
+                key,
+                &Secret::new(value.clone()),
+                ctx.change(&envy),
+            )?;
             stored += 1;
         }
     }

@@ -16,9 +16,15 @@ pub fn run(ctx: &Context, args: &RenameArgs, out: &mut dyn Write) -> Result<()> 
 
     envy.rename_variable(&environment, &args.old_name, &args.new_name)?;
 
+    // The value moves as it is; its history stays with the old name and is removed with it.
     if let Some(value) = ctx.vault.get(&envy.id, &environment, &args.old_name)? {
-        ctx.vault
-            .set(&envy.id, &environment, &args.new_name, &value)?;
+        ctx.vault.set(
+            &envy.id,
+            &environment,
+            &args.new_name,
+            &value,
+            ctx.change(&envy),
+        )?;
         ctx.vault.delete(&envy.id, &environment, &args.old_name)?;
     }
     ctx.save_envy(&envy)?;

@@ -27,16 +27,17 @@ pub fn run(ctx: &Context, args: &UpArgs, out: &mut dyn Write) -> Result<()> {
 }
 
 /// Gives the project its own id. The values stored for the old id are copied (not moved),
-/// because the project it was copied from keeps using them.
+/// because the project it was copied from keeps using them. Versions are not copied.
 fn new_id(ctx: &Context, envy: &mut Envy, out: &mut dyn Write) -> Result<()> {
     let old_id = envy.id.clone();
     let new_id = Uuid::new_v4().to_string();
+    let change = ctx.change(envy);
 
     let mut copied = 0usize;
     for environment in envy.environment_names() {
         for key in envy.effective_schema(environment)?.keys() {
             if let Some(value) = ctx.vault.get(&old_id, environment, key)? {
-                ctx.vault.set(&new_id, environment, key, &value)?;
+                ctx.vault.set(&new_id, environment, key, &value, change)?;
                 copied += 1;
             }
         }

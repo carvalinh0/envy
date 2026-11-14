@@ -132,7 +132,12 @@ mod tests {
     use super::*;
     use crate::{
         envy::{Schema, VarDetail},
-        vault::MemoryVault,
+        vault::{Change, DEFAULT_KEEP, MemoryVault},
+    };
+
+    const CHANGE: Change = Change {
+        at: chrono::DateTime::UNIX_EPOCH,
+        keep: DEFAULT_KEEP,
     };
 
     fn var(kind: &str, default: Option<&str>) -> VarDetail {
@@ -183,7 +188,7 @@ mod tests {
     fn vault_overrides_the_default() {
         let vault = MemoryVault::new();
         vault
-            .set("pid", "dev", "PORT", &Secret::new("4000"))
+            .set("pid", "dev", "PORT", &Secret::new("4000"), CHANGE)
             .unwrap();
         let envy = envy();
         let items = Resolver::new(&envy, &vault).resolve_all("dev").unwrap();
@@ -194,14 +199,20 @@ mod tests {
     fn global_vault_value_is_inherited() {
         let vault = MemoryVault::new();
         vault
-            .set("pid", GLOBAL_ENV, "REGION", &Secret::new("sa-east-1"))
+            .set(
+                "pid",
+                GLOBAL_ENV,
+                "REGION",
+                &Secret::new("sa-east-1"),
+                CHANGE,
+            )
             .unwrap();
         let envy = envy();
         let items = Resolver::new(&envy, &vault).resolve_all("dev").unwrap();
         assert_eq!(value_of(&items, "REGION").as_deref(), Some("sa-east-1"));
 
         vault
-            .set("pid", "dev", "REGION", &Secret::new("us-east-1"))
+            .set("pid", "dev", "REGION", &Secret::new("us-east-1"), CHANGE)
             .unwrap();
         let items = Resolver::new(&envy, &vault).resolve_all("dev").unwrap();
         assert_eq!(value_of(&items, "REGION").as_deref(), Some("us-east-1"));
@@ -211,7 +222,7 @@ mod tests {
     fn problems_report_missing_and_invalid_values_without_leaking() {
         let vault = MemoryVault::new();
         vault
-            .set("pid", "dev", "PORT", &Secret::new("hunter2"))
+            .set("pid", "dev", "PORT", &Secret::new("hunter2"), CHANGE)
             .unwrap();
         let envy = envy();
         let problems = Resolver::new(&envy, &vault).problems("dev", None).unwrap();
@@ -260,10 +271,16 @@ mod tests {
     fn a_member_reads_the_values_of_the_workspace_root() {
         let vault = MemoryVault::new();
         vault
-            .set("pid", "dev", "TOKEN", &Secret::new("root-token"))
+            .set("pid", "dev", "TOKEN", &Secret::new("root-token"), CHANGE)
             .unwrap();
         vault
-            .set("pid", GLOBAL_ENV, "REGION", &Secret::new("sa-east-1"))
+            .set(
+                "pid",
+                GLOBAL_ENV,
+                "REGION",
+                &Secret::new("sa-east-1"),
+                CHANGE,
+            )
             .unwrap();
         let member = member();
         let items = Resolver::new(&member, &vault).resolve_all("dev").unwrap();
@@ -279,17 +296,29 @@ mod tests {
     fn the_values_of_the_member_win_over_the_workspace() {
         let vault = MemoryVault::new();
         vault
-            .set("pid", "dev", "TOKEN", &Secret::new("root-token"))
+            .set("pid", "dev", "TOKEN", &Secret::new("root-token"), CHANGE)
             .unwrap();
         vault
-            .set("pid", GLOBAL_ENV, "REGION", &Secret::new("root-region"))
+            .set(
+                "pid",
+                GLOBAL_ENV,
+                "REGION",
+                &Secret::new("root-region"),
+                CHANGE,
+            )
             .unwrap();
         vault
-            .set("member", "dev", "TOKEN", &Secret::new("own-token"))
+            .set("member", "dev", "TOKEN", &Secret::new("own-token"), CHANGE)
             .unwrap();
         // `envy set global REGION` in the member: REGION is declared only by the root.
         vault
-            .set("member", GLOBAL_ENV, "REGION", &Secret::new("own-region"))
+            .set(
+                "member",
+                GLOBAL_ENV,
+                "REGION",
+                &Secret::new("own-region"),
+                CHANGE,
+            )
             .unwrap();
         let member = member();
         let items = Resolver::new(&member, &vault).resolve_all("dev").unwrap();
@@ -311,7 +340,7 @@ mod tests {
             Schema::from([("DB".to_string(), var("url", None))]),
         );
         vault
-            .set("pid", "prod", "DB", &Secret::new("postgres://db"))
+            .set("pid", "prod", "DB", &Secret::new("postgres://db"), CHANGE)
             .unwrap();
         let mut member = member();
         member.parent = Some(Box::new(root));

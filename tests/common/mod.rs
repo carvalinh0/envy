@@ -10,11 +10,13 @@ use std::{
 };
 
 use anyhow::{Result, anyhow};
+use chrono::{DateTime, Duration, Utc};
 use clap::Parser;
 use dot_envy::{
     app,
     bundle::AesGcmCodec,
     cli::Cli,
+    clock::Clock,
     config::Config,
     context::Context,
     envy::{Envy, GLOBAL_ENV, Schema, VarDetail},
@@ -24,11 +26,40 @@ use dot_envy::{
     schema::Secret,
     state::FileState,
     update::{ReleaseSource, SelfUpdater, UpdateMethod},
-    vault::{MemoryVault, SecretVault},
+    vault::{Change, DEFAULT_KEEP, MemoryVault, SecretVault},
 };
 use tempfile::TempDir;
 
 pub const PROJECT_ID: &str = "proj-1";
+
+/// A write for tests that store values directly in the vault.
+pub const CHANGE: Change = Change {
+    at: DateTime::UNIX_EPOCH,
+    keep: DEFAULT_KEEP,
+};
+
+/// Time stands still unless a test moves it.
+pub struct FakeClock(Cell<DateTime<Utc>>);
+
+impl Default for FakeClock {
+    fn default() -> Self {
+        Self(Cell::new(
+            DateTime::from_timestamp(1_800_000_000, 0).expect("valid timestamp"),
+        ))
+    }
+}
+
+impl FakeClock {
+    pub fn advance(&self, by: Duration) {
+        self.0.set(self.0.get() + by);
+    }
+}
+
+impl Clock for FakeClock {
+    fn now(&self) -> DateTime<Utc> {
+        self.0.get()
+    }
+}
 
 #[derive(Default)]
 pub struct FakePrompter {
@@ -146,6 +177,7 @@ pub struct Harness {
     pub runner: FakeRunner,
     pub releases: FakeReleases,
     pub updater: FakeUpdater,
+    pub clock: FakeClock,
 }
 
 impl Harness {
@@ -162,6 +194,7 @@ impl Harness {
             runner: FakeRunner::default(),
             releases: FakeReleases::default(),
             updater: FakeUpdater::default(),
+            clock: FakeClock::default(),
         }
     }
 
@@ -222,6 +255,7 @@ impl Harness {
             inferrer: &HeuristicInferrer,
             releases: &self.releases,
             updater: &self.updater,
+            clock: &self.clock,
         };
 
         let mut out = Vec::new();
