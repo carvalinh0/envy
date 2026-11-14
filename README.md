@@ -26,7 +26,7 @@ The values live in your operating system's keyring (Secret Service on Linux, Key
 | Docker containers | ❌ | None yet |
 
 > Linux and Windows are tested in CI. The macOS keyring backend is compiled in, but not tested yet.
-> On Linux you need a running Secret Service (GNOME Keyring, KeePassXC, ...) and `libdbus` to build from source.
+> On Linux you need a running Secret Service (GNOME Keyring, KeePassXC, ...) and `libdbus` to build from source. Without a Secret Service, use the [encrypted file backend](#backends-keyring-or-encrypted-file).
 > On Windows the values live in the Credential Manager, which limits each value to 2560 bytes. A value of a protected environment is stored encrypted and takes about 4/3 of its size plus 60 bytes.
 
 ## How to install
@@ -82,7 +82,8 @@ These variables are read at runtime:
 
 | Variable | What it does |
 | :-- | :-- |
-| `ENVY_BACKEND` | Where the values are stored: `keyring` (the default). `file` and `remote` are reserved for upcoming releases and fail with a clear error when a command needs a value. `--backend <name>` on the command line wins over it. |
+| `ENVY_BACKEND` | Forces the backend of every project: `keyring` or `file` (`remote` is reserved for the Envy server). Without it each project uses the backend you chose with `envy migrate` (the keyring by default). `--backend <name>` on the command line wins over it. See [Backends](#backends-keyring-or-encrypted-file). |
+| `ENVY_VAULT_PASSWORD` | Password of the encrypted file vault, for CI and other non-interactive runs. Without it Envy asks for it once per run. |
 | `ENVY_PROTECT_PASSWORD` | Password of [protected environments](#history-protection-and-audit), for CI and other non-interactive runs. Without it Envy asks for the password. |
 | `ENVY_NO_UPDATE_CHECK` | Disables the new-release hint of `envy version`. |
 
@@ -181,6 +182,17 @@ envy unprotect prod
 
 # Show this project's local audit log and verify that it was not modified
 envy audit
+
+# Move this project's values (and their history) to the encrypted file vault, or back.
+# Without --remove-source the old backend keeps its copy.
+envy migrate --to file [--remove-source]
+envy migrate --to keyring [--remove-source]
+
+# Manage the file vault of this project
+envy vault password       # change its password
+envy vault rekey prod     # encrypt an environment again with a new key
+envy vault recover        # set a new password with the recovery key
+envy vault recovery-key   # replace the recovery key
 ```
 
 When an environment is optional and omitted, Envy uses the one selected with `envy switch`.
@@ -222,6 +234,35 @@ or exported which variables, never their values. The log is per project and per 
 repository (`~/.local/share/envy/audit` on Linux, `%LOCALAPPDATA%\envy\audit` on Windows). `envy audit`
 prints it and fails if a line was edited or removed. Without a home folder (some CI containers) nothing
 is recorded.
+
+## Backends: keyring or encrypted file
+
+By default the values live in your operating system's keyring, as they always did. A project can
+move them to an **encrypted file vault** instead, which works where no keyring is available (WSL,
+containers, servers without a desktop session) and keeps every value behind one password:
+
+```bash
+envy migrate --to file --remove-source
+```
+
+The first migration asks for a new password (twice, or `ENVY_VAULT_PASSWORD`) and prints a
+**recovery key**: 24 words shown only once, three of which you type back. Write them down and keep
+them offline: they open the vault if the password is lost (`envy vault recover`), and nothing else
+can. Losing both the password and the words loses the values.
+
+The vault is one file per project in your data folder (`~/.local/share/envy/vaults` on Linux,
+`%LOCALAPPDATA%\envy\vaults` on Windows), readable only by you. Values and variable names are
+encrypted (XChaCha20-Poly1305, one key per environment, the keys protected by Argon2id of the
+password and by the recovery key); environment names, the number of values and versions, their dates
+and their size in 256-byte steps are visible. The format is described in
+[ADR 0001](docs/adr/0001-vault-record-format.md).
+
+The choice is yours, not the repository's: it is stored in `backends.json` in the same folder, so a
+teammate who clones the project keeps using the keyring until they migrate too. `--backend` and
+`ENVY_BACKEND` override it for every project. A project configured for the file backend whose file is
+missing fails; Envy never falls back to the keyring by itself. History, rollback, protected
+environments, audit and rotation reminders work the same on both backends, and each project of a
+workspace can use its own.
 
 ## Monorepos
 
