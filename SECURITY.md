@@ -18,6 +18,10 @@ Only the latest released version receives security fixes.
 ## How Envy protects your secrets
 
 - **Storage:** values are stored in the operating system keyring, one entry per `project id / environment / variable`. Envy never writes raw values to disk, except to the `.env` files you already had before `envy init` (which are removed unless you pass `--nondestructive`).
+- **History:** the previous values of a variable (5 by default) are kept in the keyring too, under the service `envy-history`, with an index of their dates. `envy rm` removes them; `"history": {"keep": 0}` keeps none.
+- **Protected environments:** values of an environment listed in `protected` are encrypted before they reach the keyring: AES-256-GCM with a key derived from the password by Argon2id (19 MiB, 2 passes), a random 128-bit salt and a random nonce per value. The password is never stored; a sealed constant in the environment's reserved entry checks it. `envy protect` clears the history of the environment, which could hold earlier values unencrypted.
+- **Audit:** a local log per project and per user records which variables were stored, removed, renamed, rolled back, run, shown or exported, by whom and when. It never contains values. Each line carries the SHA3-256 of the previous one.
+- **Bundle expiry:** `envy export --ttl` writes the expiry inside the encrypted payload, so it cannot be changed without the key.
 - **Manifest:** `envy.json` holds only names, types and non-secret defaults. Variables of type `secret` cannot have a default.
 - **Memory:** values are kept in types that are wiped on drop (`zeroize`) and print as `********` in `Display`/`Debug`. Error messages never include values.
 - **Bundles:** `envy export` encrypts with AES-256-GCM using a random 256-bit key and a random nonce per bundle. The key is printed once and never stored. Any change to the file makes decryption fail.
@@ -35,3 +39,7 @@ Knowing the limits helps you use it safely:
 - **`.envy-state`** only stores the active environment name, but should still stay out of Git.
 - **Update integrity.** Releases do not publish checksums or signatures yet, so `envy update` trusts GitHub and TLS only.
 - **Windows and macOS** keyring backends are compiled in but not tested yet.
+- **Protection is per machine.** A teammate's values are only encrypted after they run `envy protect` themselves (`envy check` warns them). Values of `global` and of a workspace root are only protected if those environments are. A process running as you can still read the environment of `envy run`, and an attacker who learns the password can decrypt the values copied from your keyring offline.
+- **Older releases.** An Envy older than 3.0 that rewrites the manifest drops `protected`, `history` and `rotate`. Encrypted values stay encrypted (it injects them as ciphertext), but values it writes are stored unencrypted and outside the history.
+- **The audit log is yours.** Anyone who can write the file can rewrite the whole chain, and the newest line is only covered once a later event is written. It detects accidental or careless edits, not a determined attacker with your account.
+- **Bundle expiry is a convenience.** Releases older than 3.0 ignore it, and whoever has the bundle and the key can decrypt it at any time.
