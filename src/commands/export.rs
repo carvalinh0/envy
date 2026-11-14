@@ -8,6 +8,7 @@ use crate::{
     cli::ExportArgs,
     context::Context,
     envy::GLOBAL_ENV,
+    vault::SecretVault,
 };
 
 pub fn run(ctx: &Context, args: &ExportArgs, out: &mut dyn Write) -> Result<()> {
@@ -33,10 +34,11 @@ pub fn run(ctx: &Context, args: &ExportArgs, out: &mut dyn Write) -> Result<()> 
 
     // Only this project's own values are exported: a workspace member's bundle does not
     // carry the root's values (export them from the root).
+    let vault = ctx.secrets(&envy);
     let mut entries = BundleEntries::new();
     for environment in &environments {
         for key in envy.effective_schema(environment)?.keys() {
-            if let Some(value) = ctx.vault.get(&envy.id, environment, key)? {
+            if let Some(value) = vault.get(&envy.id, environment, key)? {
                 entries.entry(environment.clone()).or_default().insert(
                     key.clone(),
                     Zeroizing::new(value.expose_secret().to_string()),

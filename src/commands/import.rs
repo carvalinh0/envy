@@ -6,6 +6,7 @@ use crate::{
     cli::ImportArgs,
     context::Context,
     schema::{EnvironmentTypes, Secret},
+    vault::SecretVault,
 };
 
 pub fn run(ctx: &Context, args: &ImportArgs, out: &mut dyn Write) -> Result<()> {
@@ -23,6 +24,7 @@ pub fn run(ctx: &Context, args: &ImportArgs, out: &mut dyn Write) -> Result<()> 
         );
     }
 
+    let vault = ctx.secrets(&envy);
     let mut imported = Vec::new();
     let mut skipped = 0usize;
 
@@ -42,7 +44,7 @@ pub fn run(ctx: &Context, args: &ImportArgs, out: &mut dyn Write) -> Result<()> 
                 skipped += 1;
                 continue;
             }
-            ctx.vault.set(
+            vault.set(
                 &envy.id,
                 environment,
                 key,

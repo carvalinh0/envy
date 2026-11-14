@@ -7,7 +7,8 @@ pub fn run(ctx: &Context, args: &RunArgs) -> Result<i32> {
     let envy = ctx.load_envy()?;
     let environment = ctx.target_environment(&envy, Some(&args.environment))?;
 
-    let resolver = Resolver::new(&envy, ctx.vault);
+    let vault = ctx.secrets(&envy);
+    let resolver = Resolver::new(&envy, &vault);
     let problems = resolver.problems(&environment, None)?;
     if !problems.is_empty() {
         bail!("{}", problems.join("\n"));

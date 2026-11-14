@@ -15,6 +15,7 @@ pub mod dotenv;
 pub mod envy;
 pub mod inference;
 pub mod prompt;
+pub mod protect;
 pub mod resolver;
 pub mod runner;
 pub mod schema;

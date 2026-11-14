@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow, bail};
 
-use crate::workspace;
+use crate::{schema::Secret, workspace};
 
 /// Name of the file that stores the active environment (kept out of Git).
 pub const STATE_FILE_NAME: &str = ".envy-state";
@@ -37,6 +37,8 @@ pub struct Config {
     /// The user's Envy data folder, outside every repository (holds the audit logs). `None`
     /// when no home folder can be found, which disables auditing.
     pub data_dir: Option<PathBuf>,
+    /// Password of protected environments, for non-interactive runs (`ENVY_PROTECT_PASSWORD`).
+    pub protect_password: Option<Secret>,
 }
 
 impl Config {
@@ -50,6 +52,7 @@ impl Config {
             update_notice: true,
             user: UNKNOWN_USER.to_string(),
             data_dir: None,
+            protect_password: None,
         }
     }
 
@@ -85,6 +88,7 @@ impl Config {
             .or_else(|| var("USERNAME"))
             .unwrap_or_else(|| UNKNOWN_USER.to_string());
         config.data_dir = data_dir(var);
+        config.protect_password = var("ENVY_PROTECT_PASSWORD").map(Secret::new);
         Ok(config)
     }
 

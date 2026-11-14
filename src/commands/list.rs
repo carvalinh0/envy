@@ -10,7 +10,13 @@ pub fn run(ctx: &Context, args: &ListArgs, out: &mut dyn Write) -> Result<()> {
     let envy = ctx.load_envy()?;
     let environment = ctx.target_environment(&envy, args.environment.as_deref())?;
 
-    let rows: Vec<(String, String, String)> = Resolver::new(&envy, ctx.vault)
+    // Masked values only need to exist, so a protected environment asks no password.
+    let vault = if args.show {
+        ctx.secrets(&envy)
+    } else {
+        ctx.presence(&envy)
+    };
+    let rows: Vec<(String, String, String)> = Resolver::new(&envy, &vault)
         .resolve_all(&environment)?
         .into_iter()
         .map(|item| {

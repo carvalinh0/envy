@@ -75,6 +75,12 @@ pub enum Commands {
 
     /// Show this project's local audit log and verify that it was not modified
     Audit,
+
+    /// Require a password for an environment and encrypt the values stored for it
+    Protect(ProtectArgs),
+
+    /// Remove the password of an environment and decrypt the values stored for it
+    Unprotect(ProtectArgs),
 }
 
 #[derive(Debug, Args)]
@@ -204,4 +210,9 @@ pub struct RollbackArgs {
     /// Version to restore (defaults to the one before the active value)
     #[arg(long)]
     pub to: Option<u32>,
+}
+
+#[derive(Debug, Args)]
+pub struct ProtectArgs {
+    pub environment: String,
 }

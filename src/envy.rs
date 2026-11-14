@@ -1,7 +1,11 @@
 //! The `.envy` manifest (`envy.json`): project identity, version, checksum and the
 //! typed schema of every environment.
 
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -52,6 +56,10 @@ pub struct Envy {
     pub workspace: Option<WorkspaceConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history: Option<HistoryConfig>,
+    /// Environments whose values are stored encrypted with a password. Older releases drop
+    /// this key when they rewrite the manifest, which is harmless: the values stay encrypted.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub protected: BTreeSet<String>,
     pub schemas: BTreeMap<String, Schema>,
     /// Workspace root this project inherits from. Found at runtime, never written to disk.
     #[serde(skip)]
@@ -63,11 +71,12 @@ pub struct Envy {
 #[derive(Serialize)]
 struct LaterKeys<'a> {
     history: &'a Option<HistoryConfig>,
+    protected: &'a BTreeSet<String>,
 }
 
 impl LaterKeys<'_> {
     fn is_empty(&self) -> bool {
-        self.history.is_none()
+        self.history.is_none() && self.protected.is_empty()
     }
 }
 
@@ -81,6 +90,7 @@ impl Envy {
             checksum: String::new(),
             workspace: None,
             history: None,
+            protected: BTreeSet::new(),
             schemas: BTreeMap::new(),
             parent: None,
         };
@@ -116,6 +126,7 @@ impl Envy {
         // do not use it keep the checksum they always had.
         let later = LaterKeys {
             history: &self.history,
+            protected: &self.protected,
         };
         let bytes = match (&self.workspace, later.is_empty()) {
             (None, true) => serde_json::to_vec(&base)?,
@@ -152,6 +163,32 @@ impl Envy {
     /// Versions of each value the vault keeps.
     pub fn history_keep(&self) -> usize {
         self.history.map_or(DEFAULT_KEEP, |history| history.keep)
+    }
+
+    pub fn is_protected(&self, environment: &str) -> bool {
+        self.protected.contains(environment)
+    }
+
+    /// Marks the environment as protected. Returns `false` (and changes nothing) when it
+    /// already was; otherwise bumps the version.
+    pub fn protect(&mut self, environment: &str) -> Result<bool> {
+        if !self.has_environment(environment) {
+            bail!("There's no environment called '{environment}'");
+        }
+        if !self.protected.insert(environment.to_string()) {
+            return Ok(false);
+        }
+        self.commit_change()?;
+        Ok(true)
+    }
+
+    /// The opposite of [`Envy::protect`].
+    pub fn unprotect(&mut self, environment: &str) -> Result<bool> {
+        if !self.protected.remove(environment) {
+            return Ok(false);
+        }
+        self.commit_change()?;
+        Ok(true)
     }
 
     /// Whether the environment is declared here or inherited from the workspace root.
@@ -320,6 +357,13 @@ impl Envy {
         if self.history_keep() > MAX_KEEP {
             bail!("history.keep can be at most {MAX_KEEP}.");
         }
+        if let Some(name) = self
+            .protected
+            .iter()
+            .find(|name| !self.has_environment(name))
+        {
+            bail!("The protected environment '{name}' does not exist.");
+        }
         Ok(())
     }
 
@@ -413,6 +457,7 @@ mod tests {
             checksum: checksum.to_string(),
             workspace: None,
             history: None,
+            protected: BTreeSet::new(),
             schemas: BTreeMap::new(),
             parent: None,
         }

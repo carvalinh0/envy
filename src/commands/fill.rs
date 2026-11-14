@@ -2,7 +2,10 @@ use std::io::Write;
 
 use anyhow::{Result, bail};
 
-use crate::{cli::FillArgs, context::Context, resolver::Resolver, schema::EnvironmentTypes};
+use crate::{
+    cli::FillArgs, context::Context, resolver::Resolver, schema::EnvironmentTypes,
+    vault::SecretVault,
+};
 
 const MAX_ATTEMPTS: usize = 3;
 
@@ -10,7 +13,7 @@ pub fn run(ctx: &Context, args: &FillArgs, out: &mut dyn Write) -> Result<()> {
     let envy = ctx.load_envy()?;
     let environment = ctx.target_environment(&envy, args.environment.as_deref())?;
 
-    let missing: Vec<_> = Resolver::new(&envy, ctx.vault)
+    let missing: Vec<_> = Resolver::new(&envy, &ctx.presence(&envy))
         .resolve_all(&environment)?
         .into_iter()
         .filter(|item| item.value.is_none())
@@ -24,6 +27,7 @@ pub fn run(ctx: &Context, args: &FillArgs, out: &mut dyn Write) -> Result<()> {
         return Ok(());
     }
 
+    let vault = ctx.secrets(&envy);
     let mut filled = Vec::new();
     let mut skipped = 0usize;
     for item in missing {
@@ -37,7 +41,7 @@ pub fn run(ctx: &Context, args: &FillArgs, out: &mut dyn Write) -> Result<()> {
             }
             match EnvironmentTypes::validate(answer.expose_secret(), item.kind) {
                 Ok(()) => {
-                    ctx.vault.set(
+                    vault.set(
                         &envy.id,
                         &environment,
                         &item.key,

@@ -6,9 +6,16 @@ use crate::{
     cli::CheckArgs,
     context::Context,
     envy::{Envy, GLOBAL_ENV},
+    protect,
     resolver::Resolver,
     workspace,
 };
+
+/// What a successful check prints: a summary and warnings that do not fail it.
+struct Checked {
+    summary: String,
+    warnings: Vec<String>,
+}
 
 pub fn run(ctx: &Context, args: &CheckArgs, out: &mut dyn Write) -> Result<()> {
     if args.recursive {
@@ -16,24 +23,27 @@ pub fn run(ctx: &Context, args: &CheckArgs, out: &mut dyn Write) -> Result<()> {
     }
 
     let envy = ctx.load_envy()?;
-    let summary = check_project(
+    let checked = check_project(
         ctx,
         &envy,
         args.environment.as_deref(),
         args.variable.as_deref(),
     )?;
     ctx.warn_shared_id(&envy, out)?;
-    writeln!(out, "All good: {summary}.")?;
+    for warning in &checked.warnings {
+        writeln!(out, "warning: {warning}")?;
+    }
+    writeln!(out, "All good: {}.", checked.summary)?;
     Ok(())
 }
 
-/// Checks one project. Returns a summary on success; the problems are the error.
+/// Checks one project. The problems are the error.
 fn check_project(
     ctx: &Context,
     envy: &Envy,
     environment: Option<&str>,
     variable: Option<&str>,
-) -> Result<String> {
+) -> Result<Checked> {
     envy.check_schema(None, None)?;
     if let Some(parent) = &envy.parent {
         parent.check_schema(None, None)?;
@@ -58,7 +68,8 @@ fn check_project(
             .collect(),
     };
 
-    let resolver = Resolver::new(envy, ctx.vault);
+    let vault = ctx.secrets(envy);
+    let resolver = Resolver::new(envy, &vault);
     let mut problems = Vec::new();
     let mut checked = 0usize;
 
@@ -70,10 +81,29 @@ fn check_project(
     if !problems.is_empty() {
         bail!("{}", problems.join("\n"));
     }
-    Ok(format!(
-        "{checked} variable(s) checked in {} environment(s)",
-        environments.len()
-    ))
+    Ok(Checked {
+        summary: format!(
+            "{checked} variable(s) checked in {} environment(s)",
+            environments.len()
+        ),
+        warnings: warnings(ctx, envy, &environments)?,
+    })
+}
+
+fn warnings(ctx: &Context, envy: &Envy, environments: &[&str]) -> Result<Vec<String>> {
+    let mut warnings = Vec::new();
+    for environment in environments {
+        if envy.is_protected(environment) {
+            let plain = protect::unsealed(ctx.vault, envy, environment)?;
+            if !plain.is_empty() {
+                warnings.push(format!(
+                    "'{environment}' is protected, but {} value(s) are stored unencrypted on this machine; run `envy protect {environment}`.",
+                    plain.len()
+                ));
+            }
+        }
+    }
+    Ok(warnings)
 }
 
 /// Checks every project under the start directory and fails if any of them fails, or if
@@ -106,7 +136,12 @@ fn run_recursive(ctx: &Context, environment: Option<&str>, out: &mut dyn Write) 
         });
 
         match result {
-            Ok(Some(summary)) => writeln!(out, "ok    {shown}: {summary}")?,
+            Ok(Some(checked)) => {
+                writeln!(out, "ok    {shown}: {}", checked.summary)?;
+                for warning in &checked.warnings {
+                    writeln!(out, "      warning: {warning}")?;
+                }
+            }
             Ok(None) => {
                 skipped += 1;
                 writeln!(

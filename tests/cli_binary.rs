@@ -36,8 +36,27 @@ fn help_lists_every_command_of_the_readme() {
     let assert = envy(&dir).arg("help").assert().success();
     let out = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     for command in [
-        "init", "import", "version", "update", "switch", "schema", "up", "set", "rm", "rename",
-        "export", "run", "fill", "check", "diff", "ls", "history", "rollback", "audit",
+        "init",
+        "import",
+        "version",
+        "update",
+        "switch",
+        "schema",
+        "up",
+        "set",
+        "rm",
+        "rename",
+        "export",
+        "run",
+        "fill",
+        "check",
+        "diff",
+        "ls",
+        "history",
+        "rollback",
+        "audit",
+        "protect",
+        "unprotect",
     ] {
         assert!(
             out.lines().any(|l| l.trim_start().starts_with(command)),
