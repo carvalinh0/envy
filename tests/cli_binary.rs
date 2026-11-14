@@ -248,3 +248,45 @@ fn the_project_is_found_from_a_subdirectory_and_with_dash_c() {
         .failure()
         .stderr(predicate::str::contains("'nope' is not a directory"));
 }
+
+#[test]
+fn an_unavailable_backend_fails_only_when_values_are_needed() {
+    let dir = tempfile::tempdir().unwrap();
+    // `up` only fixes the checksum, so the manifest needs no keyring to be valid.
+    std::fs::write(
+        dir.path().join("envy.json"),
+        r#"{"id":"b","name":"Backends","version":1,"checksum":"x","schemas":{"dev":{"TOKEN":{"type":"secret"}}}}"#,
+    )
+    .unwrap();
+    envy(&dir)
+        .env("ENVY_BACKEND", "remote")
+        .arg("up")
+        .assert()
+        .success();
+    envy(&dir)
+        .env("ENVY_BACKEND", "remote")
+        .arg("schema")
+        .assert()
+        .success();
+    envy(&dir)
+        .env("ENVY_BACKEND", "remote")
+        .args(["ls", "dev"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "The remote backend is not available in this version",
+        ));
+    envy(&dir)
+        .args(["--backend", "file", "ls", "dev"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "The file backend is not available",
+        ));
+    envy(&dir)
+        .env("ENVY_BACKEND", "s3")
+        .arg("version")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("ENVY_BACKEND='s3' is not valid"));
+}
