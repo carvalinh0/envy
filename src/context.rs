@@ -5,6 +5,7 @@ use std::{io::Write, path::Path};
 use anyhow::{Result, anyhow, bail};
 
 use crate::{
+    audit::{AuditEvent, AuditLog},
     bundle::BundleCodec,
     clock::Clock,
     config::Config,
@@ -29,15 +30,34 @@ pub struct Context<'a> {
     pub releases: &'a dyn ReleaseSource,
     pub updater: &'a dyn SelfUpdater,
     pub clock: &'a dyn Clock,
+    pub audit: &'a dyn AuditLog,
 }
 
-impl Context<'_> {
+impl<'a> Context<'a> {
     /// A write made now, keeping as many versions as the manifest asks for.
     pub fn change(&self, envy: &Envy) -> Change {
         Change {
             at: self.clock.now(),
             keep: envy.history_keep(),
         }
+    }
+
+    /// Appends to the project's audit log. Only names go in, never values.
+    pub fn record(
+        &self,
+        envy: &Envy,
+        action: &str,
+        environment: Option<&str>,
+        keys: Vec<String>,
+    ) -> Result<()> {
+        let event = AuditEvent {
+            at: self.clock.now(),
+            user: self.config.user.clone(),
+            action: action.to_string(),
+            environment: environment.map(str::to_string),
+            keys,
+        };
+        self.audit.record(&envy.id, &event)
     }
 
     /// Loads the project's manifest and, for a workspace member, the root it inherits from.

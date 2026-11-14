@@ -65,6 +65,14 @@ pub fn run(ctx: &Context, args: &ExportArgs, out: &mut dyn Write) -> Result<()> 
 
     let (data, key) = ctx.codec.seal(&bundle)?;
     fs::write(&path, data).with_context(|| format!("Could not write {}", path.display()))?;
+    let exported = bundle
+        .entries
+        .iter()
+        .flat_map(|(environment, values)| {
+            values.keys().map(move |key| format!("{environment}/{key}"))
+        })
+        .collect();
+    ctx.record(&envy, "export", args.environment.as_deref(), exported)?;
 
     writeln!(
         out,

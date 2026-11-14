@@ -4,6 +4,7 @@
 //! command depends on the traits defined here, which keeps them easy to test.
 
 pub mod app;
+pub mod audit;
 pub mod bundle;
 pub mod cli;
 pub mod clock;

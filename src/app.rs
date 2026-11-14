@@ -27,6 +27,7 @@ pub fn dispatch(command: Commands, ctx: &Context, out: &mut dyn Write) -> Result
         Commands::List(args) => commands::list::run(ctx, &args, out)?,
         Commands::History(args) => commands::history::run(ctx, &args, out)?,
         Commands::Rollback(args) => commands::rollback::run(ctx, &args, out)?,
+        Commands::Audit => commands::audit::run(ctx, out)?,
     }
     Ok(0)
 }

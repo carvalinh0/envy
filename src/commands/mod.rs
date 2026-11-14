@@ -1,5 +1,6 @@
 //! One module per CLI command. Each exposes `run` and depends only on [`crate::context::Context`].
 
+pub mod audit;
 pub mod check;
 pub mod diff;
 pub mod export;

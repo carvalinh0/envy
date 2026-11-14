@@ -17,6 +17,7 @@ pub fn run(ctx: &Context, args: &RemoveArgs, out: &mut dyn Write) -> Result<()> 
     envy.remove_variable(&environment, &args.secret)?;
     ctx.vault.delete(&envy.id, &environment, &args.secret)?;
     ctx.save_envy(&envy)?;
+    ctx.record(&envy, "rm", Some(&environment), vec![args.secret.clone()])?;
 
     writeln!(
         out,

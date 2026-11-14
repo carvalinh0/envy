@@ -2,6 +2,7 @@ use clap::Parser;
 
 use dot_envy::{
     app,
+    audit::FileAudit,
     bundle::AesGcmCodec,
     cli::{Cli, Commands},
     clock::SystemClock,
@@ -37,6 +38,7 @@ fn execute(cli: Cli) -> anyhow::Result<i32> {
         _ => config.discover(),
     };
     let vault = KeyringVault::default();
+    let audit = FileAudit::new(config.data_dir.clone());
     let state = FileState::new(config.state_path());
     let releases = GithubReleases::from_package()?;
     let updater = SystemUpdater::from_environment(&SystemRunner);
@@ -51,6 +53,7 @@ fn execute(cli: Cli) -> anyhow::Result<i32> {
         releases: &releases,
         updater: &updater,
         clock: &SystemClock,
+        audit: &audit,
     };
 
     app::dispatch(cli.command, &ctx, &mut std::io::stdout())

@@ -14,6 +14,7 @@ use chrono::{DateTime, Duration, Utc};
 use clap::Parser;
 use dot_envy::{
     app,
+    audit::{AuditEvent, AuditLog, FileAudit},
     bundle::AesGcmCodec,
     cli::Cli,
     clock::Clock,
@@ -178,13 +179,18 @@ pub struct Harness {
     pub releases: FakeReleases,
     pub updater: FakeUpdater,
     pub clock: FakeClock,
+    /// The real log, written to a hidden folder of the temporary directory (hidden so
+    /// `check -r` and the `.env` scan never see it).
+    pub audit: FileAudit,
 }
 
 impl Harness {
     pub fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::new(dir.path(), "envy.json", "schemas/v1.json");
+        let mut config = Config::new(dir.path(), "envy.json", "schemas/v1.json");
+        config.user = "tester".into();
         let state = FileState::new(config.state_path());
+        let audit = FileAudit::new(Some(dir.path().join(".envy-data")));
         Self {
             dir,
             config,
@@ -195,6 +201,7 @@ impl Harness {
             releases: FakeReleases::default(),
             updater: FakeUpdater::default(),
             clock: FakeClock::default(),
+            audit,
         }
     }
 
@@ -203,8 +210,9 @@ impl Harness {
     pub fn cd(&mut self, relative: &str) {
         let dir = self.dir.path().join(relative);
         fs::create_dir_all(&dir).unwrap();
-        self.config =
-            Config::new(&dir, &self.config.file_name, &self.config.schema_path).discover();
+        let mut config = Config::new(&dir, &self.config.file_name, &self.config.schema_path);
+        config.user = self.config.user.clone();
+        self.config = config.discover();
         self.state = FileState::new(self.config.state_path());
     }
 
@@ -256,6 +264,7 @@ impl Harness {
             releases: &self.releases,
             updater: &self.updater,
             clock: &self.clock,
+            audit: &self.audit,
         };
 
         let mut out = Vec::new();
@@ -298,6 +307,13 @@ impl Harness {
 
     pub fn manifest(&self) -> Envy {
         Envy::load_from_file(&self.config.manifest_path()).unwrap()
+    }
+
+    /// The audit events of a project, failing the test if the chain is broken.
+    pub fn audit_events(&self, project: &str) -> Vec<AuditEvent> {
+        let trail = self.audit.read(project).unwrap().unwrap();
+        assert_eq!(trail.broken_at, None);
+        trail.events
     }
 
     pub fn stored(&self, project: &str, env: &str, key: &str) -> Option<String> {

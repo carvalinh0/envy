@@ -46,6 +46,7 @@ fn new_id(ctx: &Context, envy: &mut Envy, out: &mut dyn Write) -> Result<()> {
     envy.id = new_id;
     envy.commit_change()?;
     ctx.save_envy(envy)?;
+    ctx.record(envy, "new-id", None, Vec::new())?;
     writeln!(
         out,
         "New project id: {} (schema version {}). Copied {copied} value(s) from the old id.",

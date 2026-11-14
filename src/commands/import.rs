@@ -23,7 +23,7 @@ pub fn run(ctx: &Context, args: &ImportArgs, out: &mut dyn Write) -> Result<()> 
         );
     }
 
-    let mut imported = 0usize;
+    let mut imported = Vec::new();
     let mut skipped = 0usize;
 
     for (environment, variables) in &bundle.entries {
@@ -49,13 +49,17 @@ pub fn run(ctx: &Context, args: &ImportArgs, out: &mut dyn Write) -> Result<()> 
                 &Secret::new(value.as_str()),
                 ctx.change(&envy),
             )?;
-            imported += 1;
+            imported.push(format!("{environment}/{key}"));
         }
     }
 
     writeln!(
         out,
-        "Imported {imported} value(s) into the vault ({skipped} skipped)."
+        "Imported {} value(s) into the vault ({skipped} skipped).",
+        imported.len()
     )?;
+    if !imported.is_empty() {
+        ctx.record(&envy, "import", None, imported)?;
+    }
     Ok(())
 }
