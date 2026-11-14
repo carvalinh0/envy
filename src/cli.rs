@@ -151,6 +151,9 @@ pub struct RenameArgs {
 pub struct ExportArgs {
     /// Export only this environment (and `global`). Without it every environment is exported.
     pub environment: Option<String>,
+    /// Refuse to import the bundle after this long (e.g. 12h, 7d, 2w)
+    #[arg(long, value_name = "DURATION")]
+    pub ttl: Option<String>,
 }
 
 #[derive(Debug, Args)]

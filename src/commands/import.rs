@@ -16,6 +16,14 @@ pub fn run(ctx: &Context, args: &ImportArgs, out: &mut dyn Write) -> Result<()> 
     let data = fs::read(&path).with_context(|| format!("Could not read {}", path.display()))?;
     let bundle = ctx.codec.open(&data, &args.key)?;
 
+    if let Some(expires_at) = bundle.expires_at
+        && expires_at <= ctx.clock.now()
+    {
+        bail!(
+            "This bundle expired on {}. Ask for a new export.",
+            expires_at.format("%Y-%m-%d %H:%M UTC")
+        );
+    }
     if bundle.project_id != envy.id {
         bail!(
             "This bundle belongs to another project ('{}'), not to '{}'.",

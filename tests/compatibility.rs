@@ -1,5 +1,5 @@
 //! Inputs written by releases before 3.0 must keep working: manifests, keyring entries and
-//! bundles that know nothing about history or protection.
+//! bundles that know nothing about history, protection or expiry.
 
 mod common;
 

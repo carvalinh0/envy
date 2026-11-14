@@ -200,3 +200,42 @@ fn import_of_a_missing_or_invalid_file_fails() {
             .contains("not a valid Envy bundle")
     );
 }
+
+// ---------- export --ttl ----------
+
+#[test]
+fn a_bundle_with_a_ttl_imports_until_it_expires() {
+    let h = populated();
+    let out = h.ok(&["export", "dev", "--ttl", "2d"]);
+    assert!(
+        out.contains("It can be imported until 2027-01-17 08:00 UTC"),
+        "{out}"
+    );
+    let key = key_from(&out);
+    let path = h.path("Sample.dev.envy");
+
+    let early = teammate();
+    early.clock.advance(chrono::Duration::days(1));
+    early.ok(&["import", path.to_str().unwrap(), &key]);
+    assert_eq!(
+        early.stored(PROJECT_ID, "dev", "API_TOKEN").as_deref(),
+        Some(SECRET_VALUE)
+    );
+
+    let late = teammate();
+    late.clock.advance(chrono::Duration::days(3));
+    let err = late.err(&["import", path.to_str().unwrap(), &key]);
+    assert!(
+        err.contains("This bundle expired on 2027-01-17 08:00 UTC"),
+        "{err}"
+    );
+    assert!(late.vault.is_empty());
+}
+
+#[test]
+fn an_invalid_ttl_writes_no_bundle() {
+    let h = populated();
+    let err = h.err(&["export", "dev", "--ttl", "soon"]);
+    assert!(err.contains("'soon' is not a duration"), "{err}");
+    assert!(!h.exists("Sample.dev.envy"));
+}
