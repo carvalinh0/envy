@@ -1,5 +1,5 @@
 //! Inputs written by releases before 3.0 must keep working: manifests, keyring entries and
-//! bundles that know nothing about history.
+//! bundles that know nothing about history or protection.
 
 mod common;
 
@@ -21,14 +21,16 @@ fn manifests_written_by_older_releases_keep_their_checksum() {
         let envy: Envy = serde_json::from_str(json).unwrap();
         assert!(envy.is_checksum_valid().unwrap(), "{json}");
         let saved = serde_json::to_string(&envy).unwrap();
-        assert!(!saved.contains("history"), "{saved}");
+        for key in ["history", "protected"] {
+            assert!(!saved.contains(key), "{key} must not appear: {saved}");
+        }
     }
 }
 
 #[test]
 fn a_new_key_changes_the_checksum() {
     let mut envy: Envy = serde_json::from_str(LEGACY).unwrap();
-    envy.history = Some(dot_envy::envy::HistoryConfig { keep: 3 });
+    envy.protected.insert("dev".into());
     assert!(!envy.is_checksum_valid().unwrap());
 }
 

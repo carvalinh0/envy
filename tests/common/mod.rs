@@ -212,6 +212,7 @@ impl Harness {
         fs::create_dir_all(&dir).unwrap();
         let mut config = Config::new(&dir, &self.config.file_name, &self.config.schema_path);
         config.user = self.config.user.clone();
+        config.protect_password = self.config.protect_password.clone();
         self.config = config.discover();
         self.state = FileState::new(self.config.state_path());
     }

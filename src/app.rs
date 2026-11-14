@@ -28,6 +28,8 @@ pub fn dispatch(command: Commands, ctx: &Context, out: &mut dyn Write) -> Result
         Commands::History(args) => commands::history::run(ctx, &args, out)?,
         Commands::Rollback(args) => commands::rollback::run(ctx, &args, out)?,
         Commands::Audit => commands::audit::run(ctx, out)?,
+        Commands::Protect(args) => commands::protect::run(ctx, &args, out)?,
+        Commands::Unprotect(args) => commands::unprotect::run(ctx, &args, out)?,
     }
     Ok(0)
 }

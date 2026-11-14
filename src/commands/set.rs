@@ -6,6 +6,7 @@ use crate::{
     cli::SetArgs,
     context::Context,
     schema::{EnvironmentTypes, Secret},
+    vault::SecretVault,
 };
 
 pub fn run(ctx: &Context, args: &SetArgs, out: &mut dyn Write) -> Result<()> {
@@ -21,7 +22,7 @@ pub fn run(ctx: &Context, args: &SetArgs, out: &mut dyn Write) -> Result<()> {
         )
     })?;
 
-    ctx.vault.set(
+    ctx.secrets(&envy).set(
         &envy.id,
         &environment,
         &args.secret,

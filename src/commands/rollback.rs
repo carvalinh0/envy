@@ -2,7 +2,12 @@ use std::io::Write;
 
 use anyhow::{Result, anyhow, bail};
 
-use crate::{cli::RollbackArgs, context::Context, schema::EnvironmentTypes, vault::Version};
+use crate::{
+    cli::RollbackArgs,
+    context::Context,
+    schema::EnvironmentTypes,
+    vault::{SecretVault, Version},
+};
 
 /// Stores an older value as a new version, so a rollback is itself kept in the history and
 /// can be undone with another rollback.
@@ -16,15 +21,15 @@ pub fn run(ctx: &Context, args: &RollbackArgs, out: &mut dyn Write) -> Result<()
     let target = pick(&versions, args.to)
         .map_err(|reason| anyhow!("Can't roll '{key}' back in '{environment}': {reason}"))?;
 
-    let Some(value) = ctx.vault.get_version(&envy.id, &environment, key, target)? else {
+    let vault = ctx.secrets(&envy);
+    let Some(value) = vault.get_version(&envy.id, &environment, key, target)? else {
         bail!("Version {target} of '{key}' is no longer stored.");
     };
     if let Err(err) = EnvironmentTypes::validate(value.expose_secret(), kind) {
         bail!("Version {target} of '{key}' is not a valid {kind} anymore: {err}");
     }
 
-    ctx.vault
-        .set(&envy.id, &environment, key, &value, ctx.change(&envy))?;
+    vault.set(&envy.id, &environment, key, &value, ctx.change(&envy))?;
     ctx.record(
         &envy,
         "rollback",

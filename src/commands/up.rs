@@ -3,7 +3,7 @@ use std::io::Write;
 use anyhow::Result;
 use uuid::Uuid;
 
-use crate::{cli::UpArgs, context::Context, envy::Envy};
+use crate::{cli::UpArgs, context::Context, envy::Envy, protect::CHECK_SLOT, vault::Change};
 
 pub fn run(ctx: &Context, args: &UpArgs, out: &mut dyn Write) -> Result<()> {
     let mut envy = ctx.load_envy()?;
@@ -27,7 +27,8 @@ pub fn run(ctx: &Context, args: &UpArgs, out: &mut dyn Write) -> Result<()> {
 }
 
 /// Gives the project its own id. The values stored for the old id are copied (not moved),
-/// because the project it was copied from keeps using them. Versions are not copied.
+/// because the project it was copied from keeps using them. Sealed values are copied as they
+/// are, together with the password check of their environment; versions are not copied.
 fn new_id(ctx: &Context, envy: &mut Envy, out: &mut dyn Write) -> Result<()> {
     let old_id = envy.id.clone();
     let new_id = Uuid::new_v4().to_string();
@@ -35,6 +36,11 @@ fn new_id(ctx: &Context, envy: &mut Envy, out: &mut dyn Write) -> Result<()> {
 
     let mut copied = 0usize;
     for environment in envy.environment_names() {
+        if let Some(check) = ctx.vault.get(&old_id, environment, CHECK_SLOT)? {
+            let no_history = Change { keep: 0, ..change };
+            ctx.vault
+                .set(&new_id, environment, CHECK_SLOT, &check, no_history)?;
+        }
         for key in envy.effective_schema(environment)?.keys() {
             if let Some(value) = ctx.vault.get(&old_id, environment, key)? {
                 ctx.vault.set(&new_id, environment, key, &value, change)?;

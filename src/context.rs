@@ -12,6 +12,7 @@ use crate::{
     envy::Envy,
     inference::TypeInferrer,
     prompt::Prompter,
+    protect::ProtectedVault,
     runner::ProcessRunner,
     state::StateStore,
     update::{ReleaseSource, SelfUpdater},
@@ -21,6 +22,8 @@ use crate::{
 
 pub struct Context<'a> {
     pub config: &'a Config,
+    /// The raw vault: sealed values of protected environments come out as they are stored.
+    /// Use [`Context::secrets`] whenever values are read or written for the user.
     pub vault: &'a dyn SecretVault,
     pub state: &'a dyn StateStore,
     pub prompter: &'a dyn Prompter,
@@ -34,6 +37,28 @@ pub struct Context<'a> {
 }
 
 impl<'a> Context<'a> {
+    /// The vault seen through the project's protected environments: writes to them are
+    /// encrypted and sealed values are decrypted (asking for the password once).
+    pub fn secrets(&self, envy: &Envy) -> ProtectedVault<'a> {
+        self.protected_vault(envy, true)
+    }
+
+    /// Like [`Context::secrets`], but sealed values are returned without decrypting them,
+    /// for commands that only need to know whether a value exists.
+    pub fn presence(&self, envy: &Envy) -> ProtectedVault<'a> {
+        self.protected_vault(envy, false)
+    }
+
+    fn protected_vault(&self, envy: &Envy, reveal: bool) -> ProtectedVault<'a> {
+        ProtectedVault::new(
+            self.vault,
+            envy,
+            self.prompter,
+            self.config.protect_password.as_ref(),
+            reveal,
+        )
+    }
+
     /// A write made now, keeping as many versions as the manifest asks for.
     pub fn change(&self, envy: &Envy) -> Change {
         Change {
