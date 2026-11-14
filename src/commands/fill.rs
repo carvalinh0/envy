@@ -36,7 +36,13 @@ pub fn run(ctx: &Context, args: &FillArgs, out: &mut dyn Write) -> Result<()> {
             }
             match EnvironmentTypes::validate(answer.expose_secret(), item.kind) {
                 Ok(()) => {
-                    ctx.vault.set(&envy.id, &environment, &item.key, &answer)?;
+                    ctx.vault.set(
+                        &envy.id,
+                        &environment,
+                        &item.key,
+                        &answer,
+                        ctx.change(&envy),
+                    )?;
                     stored = true;
                     break;
                 }

@@ -26,6 +26,7 @@ pub fn run(ctx: &Context, args: &SetArgs, out: &mut dyn Write) -> Result<()> {
         &environment,
         &args.secret,
         &Secret::new(args.value.clone()),
+        ctx.change(&envy),
     )?;
     writeln!(out, "Stored '{}' in '{environment}'.", args.secret)?;
     Ok(())

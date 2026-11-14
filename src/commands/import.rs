@@ -42,8 +42,13 @@ pub fn run(ctx: &Context, args: &ImportArgs, out: &mut dyn Write) -> Result<()> 
                 skipped += 1;
                 continue;
             }
-            ctx.vault
-                .set(&envy.id, environment, key, &Secret::new(value.as_str()))?;
+            ctx.vault.set(
+                &envy.id,
+                environment,
+                key,
+                &Secret::new(value.as_str()),
+                ctx.change(&envy),
+            )?;
             imported += 1;
         }
     }

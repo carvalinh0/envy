@@ -1,6 +1,6 @@
 mod common;
 
-use common::{Harness, PROJECT_ID};
+use common::{CHANGE, Harness, PROJECT_ID};
 
 const SECRET_VALUE: &str = "s3cr3t-value-123";
 
@@ -206,7 +206,7 @@ fn check_uses_a_vault_value_over_the_default_and_validates_it() {
     let h = ready();
     use dot_envy::{schema::Secret, vault::SecretVault};
     h.vault
-        .set(PROJECT_ID, "dev", "PORT", &Secret::new("oops"))
+        .set(PROJECT_ID, "dev", "PORT", &Secret::new("oops"), CHANGE)
         .unwrap();
     let err = h.err(&["check", "dev"]);
     assert!(err.contains("Invalid value for 'PORT' in 'dev'"), "{err}");

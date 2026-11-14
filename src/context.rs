@@ -6,6 +6,7 @@ use anyhow::{Result, anyhow, bail};
 
 use crate::{
     bundle::BundleCodec,
+    clock::Clock,
     config::Config,
     envy::Envy,
     inference::TypeInferrer,
@@ -13,7 +14,7 @@ use crate::{
     runner::ProcessRunner,
     state::StateStore,
     update::{ReleaseSource, SelfUpdater},
-    vault::SecretVault,
+    vault::{Change, SecretVault},
     workspace,
 };
 
@@ -27,9 +28,18 @@ pub struct Context<'a> {
     pub inferrer: &'a dyn TypeInferrer,
     pub releases: &'a dyn ReleaseSource,
     pub updater: &'a dyn SelfUpdater,
+    pub clock: &'a dyn Clock,
 }
 
 impl Context<'_> {
+    /// A write made now, keeping as many versions as the manifest asks for.
+    pub fn change(&self, envy: &Envy) -> Change {
+        Change {
+            at: self.clock.now(),
+            keep: envy.history_keep(),
+        }
+    }
+
     /// Loads the project's manifest and, for a workspace member, the root it inherits from.
     pub fn load_envy(&self) -> Result<Envy> {
         let path = self.config.manifest_path();
