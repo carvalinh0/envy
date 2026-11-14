@@ -20,6 +20,9 @@
 
 #[cfg(test)]
 pub(crate) mod conformance;
+mod file;
+
+pub use file::EncryptedFileVault;
 
 use std::{collections::HashMap, sync::Mutex};
 
