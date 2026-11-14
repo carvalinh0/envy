@@ -45,6 +45,27 @@
         }
       }
     },
+    "history": {
+      "type": "object",
+      "title": "How many older values of each variable the vault keeps (for envy rollback)",
+      "required": ["keep"],
+      "additionalProperties": false,
+      "properties": {
+        "keep": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20,
+          "default": 5,
+          "description": "0 keeps no history. Without this key 5 versions are kept."
+        }
+      }
+    },
+    "protected": {
+      "type": "array",
+      "title": "Environments whose values are stored encrypted with a password (envy protect)",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
     "schemas": {
       "type": "object",
       "title": "Your environments configuration",
@@ -75,6 +96,19 @@
           "minLength": 1,
           "description": "Default values cannot be empty.",
           "$comment": "The value itself"
+        },
+        "rotate": {
+          "type": "object",
+          "title": "How often the value should be replaced (envy check and envy ls warn when it is due)",
+          "required": ["every"],
+          "additionalProperties": false,
+          "properties": {
+            "every": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*[hdw]$",
+              "description": "A number followed by h (hours), d (days) or w (weeks), e.g. 90d."
+            }
+          }
         },
         "type": {
           "type": "string",

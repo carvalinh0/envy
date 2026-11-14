@@ -27,7 +27,7 @@ The values live in your operating system's keyring (Secret Service on Linux, Key
 
 > Linux and Windows are tested in CI. The macOS keyring backend is compiled in, but not tested yet.
 > On Linux you need a running Secret Service (GNOME Keyring, KeePassXC, ...) and `libdbus` to build from source.
-> On Windows the values live in the Credential Manager, which limits each value to 2560 bytes.
+> On Windows the values live in the Credential Manager, which limits each value to 2560 bytes. A value of a protected environment is stored encrypted and takes about 4/3 of its size plus 60 bytes.
 
 ## How to install
 
@@ -77,6 +77,14 @@ FILE_NAME=custom.json SCHEMA_PATH=./schemas/v1.json envy init "My Project"
 ```
 
 The active environment (`envy switch`) is stored in a local `.envy-state` file. **Do not commit it** (add it to your `.gitignore`).
+
+These variables are read at runtime:
+
+| Variable | What it does |
+| :-- | :-- |
+| `ENVY_BACKEND` | Where the values are stored: `keyring` (the default). `file` and `remote` are reserved for upcoming releases and fail with a clear error when a command needs a value. `--backend <name>` on the command line wins over it. |
+| `ENVY_PROTECT_PASSWORD` | Password of [protected environments](#history-protection-and-audit), for CI and other non-interactive runs. Without it Envy asks for the password. |
+| `ENVY_NO_UPDATE_CHECK` | Disables the new-release hint of `envy version`. |
 
 ## Usage
 
@@ -137,6 +145,7 @@ envy rename my_secret my_secret_renamed [--in <environment>]
 # printed ONCE: send it through a different channel than the bundle.
 envy export     # Exports all environments
 envy export dev # Exports only dev (and global) secrets
+envy export dev --ttl 7d # `envy import` refuses the bundle after 7 days (h, d or w)
 
 # Run your project with environment variables injected directly into the child process.
 # Fails without starting the command if any variable is missing or invalid.
@@ -159,6 +168,19 @@ envy diff dev prod # Compare differences between dev and prod schemas
 
 # List all project environment keys securely (values masked by default)
 envy ls [environment] [--show]
+
+# Show the stored versions of a variable (dates only, never values) and restore one.
+# Without --to the version before the active one is restored; the rollback is itself a
+# new version, so it can be undone.
+envy history API_TOKEN [--in <environment>]
+envy rollback API_TOKEN [--in <environment>] [--to <version>]
+
+# Require a password for an environment: its values are stored encrypted.
+envy protect prod
+envy unprotect prod
+
+# Show this project's local audit log and verify that it was not modified
+envy audit
 ```
 
 When an environment is optional and omitted, Envy uses the one selected with `envy switch`.
@@ -171,6 +193,35 @@ was started in `<dir>`:
 ```bash
 envy -C services/api check prod
 ```
+
+## History, protection and audit
+
+Everything here works with the local keyring; no server is involved.
+
+**History.** Every time a value changes, the old one is kept as a version: `envy history` lists them and
+`envy rollback` restores one. Five versions are kept per variable; change it with `"history": {"keep": N}`
+in the manifest (0 to 20, 0 keeps none). `envy rm` removes the versions too, and `envy rename` starts the
+new name without history. Values stored by an Envy older than 3.0 show an unknown date.
+
+**Protected environments.** `envy protect prod` asks for a new password (twice), encrypts the values of
+`prod` stored on your machine, clears their history (it could hold them unencrypted) and adds `prod` to
+the `protected` list of the manifest. From then on every value written to `prod` is encrypted with a key
+derived from the password (Argon2id + AES-256-GCM), and `envy run`, `check`, `export` and `ls --show`
+ask for the password once per run (or read `ENVY_PROTECT_PASSWORD`). `envy ls` without `--show` needs no
+password. The password belongs to each machine: when a teammate pulls a manifest that protects `prod`,
+`envy check` warns them about values stored unencrypted, and `envy protect prod` encrypts them with their
+own password. Encrypted values stay encrypted even if an older Envy removes `protected` from the manifest.
+Protect `global` too if it holds secrets used by a protected environment.
+
+**Rotation reminders.** A variable can declare how often it should be replaced:
+`"API_TOKEN": { "type": "secret", "rotate": { "every": "90d" } }` (`h`, `d` or `w`). `envy check` and
+`envy ls` print a warning when the stored value is older than that; the exit code does not change.
+
+**Audit.** Envy records who stored, removed, renamed, rolled back, ran (`envy run`), showed (`ls --show`)
+or exported which variables, never their values. The log is per project and per user, outside the
+repository (`~/.local/share/envy/audit` on Linux, `%LOCALAPPDATA%\envy\audit` on Windows). `envy audit`
+prints it and fails if a line was edited or removed. Without a home folder (some CI containers) nothing
+is recorded.
 
 ## Monorepos
 
@@ -295,6 +346,8 @@ The file is validated by [`schemas/v1.json`](schemas/v1.json).
 | version | Schema version counter used by Envy to ensure stored local values match the expected structure. | Auto-managed. Envy automatically bumps this version whenever schema structure changes. |
 | checksum | SHA3-256 integrity hash of the file content (except the checksum itself) used to detect manual edits and git updates. | Auto-managed. If edited manually, run `envy up` to recalculate it and bump the version. |
 | workspace | Optional. Makes the manifest a workspace root; `members` lists the projects that inherit it (see [Monorepos](#monorepos)). | Yes. Run `envy up` afterwards. |
+| history | Optional. `{ "keep": N }`: versions of each value kept for `envy rollback` (default 5, at most 20). | Yes. Run `envy up` afterwards. |
+| protected | Optional. Environments whose values are encrypted with a password. Managed by `envy protect` / `envy unprotect`. | Prefer the commands: added by hand, it only encrypts the values written afterwards. |
 | schemas | Container object holding variable type definitions and defaults for each environment. | Yes. You can edit variable types, add defaults, or modify schemas manually or via CLI commands. |
 | schemas.global | Variables shared across all environments in the project. An environment can override them. | Yes. |
 | schemas.&lt;env&gt; | Environment-specific definitions (e.g., dev, prod). Each variable is an object `{ "type": "...", "default": "..." }`. | Yes. |
@@ -304,6 +357,7 @@ The file is validated by [`schemas/v1.json`](schemas/v1.json).
 `i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`, `u32`, `u64`, `u128`, `f32`, `f64`, `ip`, `url`, `port`, `uuid`, `base64`, `string`, `boolean`, `iso`, `cron`, `secret`.
 
 - `default` is optional, must not be empty and must be a valid value for the type.
+- `rotate` is optional: `{ "every": "90d" }` makes `envy check` and `envy ls` warn when the value is older than that.
 - A `secret` can **not** have a default, because the manifest is committed to Git.
 - `iso` is an RFC 3339 date-time and `cron` is a cron expression with a seconds field (6 fields, or 7 with the year).
 

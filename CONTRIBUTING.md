@@ -56,12 +56,16 @@ Commands depend on abstractions, never on the operating system directly (SOLID):
 | `app` | Routes a parsed command to its handler. |
 | `commands/*` | One file per command. Each exposes `run` and receives a `Context`. |
 | `context` | The dependencies a command needs, as trait objects. |
-| `config` | `FILE_NAME`, `SCHEMA_PATH` (build-time defaults plus environment override), `-C` and paths. |
+| `config` | `FILE_NAME`, `SCHEMA_PATH` (build-time defaults plus environment override), `-C`, paths, the user, their data folder and `ENVY_PROTECT_PASSWORD`. |
 | `workspace` | Finding manifests: the project above the current folder, the workspace root of a member and every manifest of a tree. |
 | `envy` | The manifest: model, checksum, structural validation and schema changes. |
 | `schema` | Variable types, value parsing and the redacting `Secret` type. |
 | `resolver` | Effective value of each variable (vault, `global`, workspace root, default). |
-| `vault` | `SecretVault` trait, `KeyringVault` (production) and `MemoryVault` (tests). |
+| `vault` | `SecretVault` trait (values with history), `CredentialStore` (flat entries), `KeyringVault` (production), `MemoryVault` (tests) and `UnavailableVault` (backends not built yet). `vault/conformance.rs` is the suite every backend must pass. |
+| `protect` | Password-protected environments: sealing values and `ProtectedVault`, the vault commands use through `Context::secrets`. |
+| `audit` | `AuditLog` trait and the hash-chained file in the user's data folder. |
+| `clock` | `Clock` trait and the durations of `rotate.every` and `--ttl`. |
+| `rotation` | `rotate.every` warnings from the vault's history. |
 | `state` | `StateStore` trait and the `.envy-state` file. |
 | `bundle` | `BundleCodec` trait and the AES-256-GCM implementation. |
 | `dotenv`, `inference` | Reading `.env` files and guessing types (`TypeInferrer` trait). |
@@ -72,7 +76,7 @@ To add a command: add its arguments to `cli.rs`, create `commands/<name>.rs`, re
 
 ### Testing
 
-`tests/common/mod.rs` has a `Harness` that runs real arguments through `app::dispatch` with an in-memory vault, a scripted prompter and a recording process runner. Network access is behind `ReleaseSource`, and replacing the executable behind `SelfUpdater`, so the update tests never touch GitHub or the installed binary. `tests/cli_binary.rs` exercises the compiled binary and only uses commands that do not need a keyring.
+`tests/common/mod.rs` has a `Harness` that runs real arguments through `app::dispatch` with an in-memory vault, a scripted prompter, a recording process runner, a fixed clock and an audit log in the temporary folder. A new vault backend calls `vault::conformance::run` in its tests. Network access is behind `ReleaseSource`, and replacing the executable behind `SelfUpdater`, so the update tests never touch GitHub or the installed binary. `tests/cli_binary.rs` exercises the compiled binary and only uses commands that do not need a keyring.
 
 ## Reporting issues and security problems
 
