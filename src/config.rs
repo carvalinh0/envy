@@ -32,6 +32,11 @@ pub struct Config {
     pub schema_path: String,
     /// Whether `envy version` may look for a newer release (`ENVY_NO_UPDATE_CHECK` disables it).
     pub update_notice: bool,
+    /// Name recorded in the audit log (`USER`, or `USERNAME` on Windows).
+    pub user: String,
+    /// The user's Envy data folder, outside every repository (holds the audit logs). `None`
+    /// when no home folder can be found, which disables auditing.
+    pub data_dir: Option<PathBuf>,
 }
 
 impl Config {
@@ -43,6 +48,8 @@ impl Config {
             file_name: file_name.to_string(),
             schema_path: schema_path.to_string(),
             update_notice: true,
+            user: UNKNOWN_USER.to_string(),
+            data_dir: None,
         }
     }
 
@@ -73,6 +80,11 @@ impl Config {
         };
         let mut config = Self::new(base_dir, &file_name, &schema_path);
         config.update_notice = update_notice_enabled(std::env::var("ENVY_NO_UPDATE_CHECK").ok());
+        let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+        config.user = var("USER")
+            .or_else(|| var("USERNAME"))
+            .unwrap_or_else(|| UNKNOWN_USER.to_string());
+        config.data_dir = data_dir(var);
         Ok(config)
     }
 
@@ -92,6 +104,23 @@ impl Config {
     pub fn state_path(&self) -> PathBuf {
         self.base_dir.join(STATE_FILE_NAME)
     }
+}
+
+const UNKNOWN_USER: &str = "unknown";
+
+/// Where each platform keeps per-user application data, with an `envy` folder inside.
+/// `var` returns non-empty environment variables only.
+fn data_dir(var: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let base = if cfg!(windows) {
+        var("LOCALAPPDATA").map(PathBuf::from)
+    } else if cfg!(target_os = "macos") {
+        var("HOME").map(|home| Path::new(&home).join("Library/Application Support"))
+    } else {
+        var("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| var("HOME").map(|home| Path::new(&home).join(".local/share")))
+    };
+    base.map(|dir| dir.join("envy"))
 }
 
 /// `ENVY_NO_UPDATE_CHECK` set to anything non-empty disables the notice in `envy version`.
@@ -161,6 +190,41 @@ mod tests {
         assert!(update_notice_enabled(Some(String::new())));
         assert!(!update_notice_enabled(Some("1".into())));
         assert!(Config::new("/x", "envy.json", "s").update_notice);
+    }
+
+    #[test]
+    #[cfg(all(unix, not(target_os = "macos")))]
+    fn data_folder_follows_xdg_then_home() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| value.to_string())
+            }
+        };
+        assert_eq!(
+            data_dir(env(&[("XDG_DATA_HOME", "/xdg"), ("HOME", "/home/ana")])),
+            Some(PathBuf::from("/xdg/envy"))
+        );
+        assert_eq!(
+            data_dir(env(&[("HOME", "/home/ana")])),
+            Some(PathBuf::from("/home/ana/.local/share/envy"))
+        );
+        assert_eq!(data_dir(env(&[])), None);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn data_folder_is_local_app_data() {
+        let var = |name: &str| {
+            (name == "LOCALAPPDATA").then(|| r"C:\Users\ana\AppData\Local".to_string())
+        };
+        assert_eq!(
+            data_dir(var),
+            Some(PathBuf::from(r"C:\Users\ana\AppData\Local").join("envy"))
+        );
+        assert_eq!(data_dir(|_| None), None);
     }
 
     #[test]

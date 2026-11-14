@@ -22,5 +22,7 @@ pub fn run(ctx: &Context, args: &RunArgs) -> Result<i32> {
     let Some((program, rest)) = args.command.split_first() else {
         bail!("No command to run. Use `envy run <env> -- <command>`.");
     };
+    let names = envs.iter().map(|(key, _)| key.clone()).collect();
+    ctx.record(&envy, "run", Some(&environment), names)?;
     ctx.runner.run(program, rest, &envs)
 }

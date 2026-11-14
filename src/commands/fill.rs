@@ -24,7 +24,8 @@ pub fn run(ctx: &Context, args: &FillArgs, out: &mut dyn Write) -> Result<()> {
         return Ok(());
     }
 
-    let (mut filled, mut skipped) = (0usize, 0usize);
+    let mut filled = Vec::new();
+    let mut skipped = 0usize;
     for item in missing {
         let label = format!("{} ({}) [{environment}]", item.key, item.kind);
         let mut stored = false;
@@ -55,13 +56,20 @@ pub fn run(ctx: &Context, args: &FillArgs, out: &mut dyn Write) -> Result<()> {
         }
 
         if stored {
-            filled += 1;
+            filled.push(item.key);
         } else {
             skipped += 1;
         }
     }
 
-    writeln!(out, "Filled {filled} variable(s), skipped {skipped}.")?;
+    writeln!(
+        out,
+        "Filled {} variable(s), skipped {skipped}.",
+        filled.len()
+    )?;
+    if !filled.is_empty() {
+        ctx.record(&envy, "fill", Some(&environment), filled)?;
+    }
     if skipped > 0 {
         bail!("{skipped} variable(s) of '{environment}' still have no value.");
     }

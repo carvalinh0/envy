@@ -32,8 +32,12 @@ pub fn run(ctx: &Context, args: &ListArgs, out: &mut dyn Write) -> Result<()> {
     let type_width = rows.iter().map(|r| r.1.len()).chain([4]).max().unwrap_or(4);
 
     writeln!(out, "{:<key_width$}  {:<type_width$}  VALUE", "KEY", "TYPE")?;
+    let shown: Vec<String> = rows.iter().map(|row| row.0.clone()).collect();
     for (key, kind, value) in rows {
         writeln!(out, "{key:<key_width$}  {kind:<type_width$}  {value}")?;
+    }
+    if args.show {
+        ctx.record(&envy, "show", Some(&environment), shown)?;
     }
     Ok(())
 }

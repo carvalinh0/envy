@@ -28,6 +28,7 @@ pub fn run(ctx: &Context, args: &SetArgs, out: &mut dyn Write) -> Result<()> {
         &Secret::new(args.value.clone()),
         ctx.change(&envy),
     )?;
+    ctx.record(&envy, "set", Some(&environment), vec![args.secret.clone()])?;
     writeln!(out, "Stored '{}' in '{environment}'.", args.secret)?;
     Ok(())
 }

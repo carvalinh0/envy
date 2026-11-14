@@ -72,6 +72,9 @@ pub enum Commands {
 
     /// Restore an earlier version of a variable (the current value stays in the history)
     Rollback(RollbackArgs),
+
+    /// Show this project's local audit log and verify that it was not modified
+    Audit,
 }
 
 #[derive(Debug, Args)]

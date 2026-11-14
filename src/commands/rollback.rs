@@ -25,6 +25,12 @@ pub fn run(ctx: &Context, args: &RollbackArgs, out: &mut dyn Write) -> Result<()
 
     ctx.vault
         .set(&envy.id, &environment, key, &value, ctx.change(&envy))?;
+    ctx.record(
+        &envy,
+        "rollback",
+        Some(&environment),
+        vec![format!("{key}@{target}")],
+    )?;
     writeln!(
         out,
         "Restored version {target} of '{key}' in '{environment}'. `envy history {key}` lists the versions."

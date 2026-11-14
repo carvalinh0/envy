@@ -161,3 +161,62 @@ fn rollback_refuses_a_value_that_no_longer_matches_the_type() {
     );
     assert_eq!(h.stored(PROJECT_ID, "dev", "PORT").as_deref(), Some("8080"));
 }
+
+// ---------- audit ----------
+
+#[test]
+fn changes_and_exposures_are_audited_without_values() {
+    let h = twice_set();
+    h.ok(&["set", "dev", "DATABASE_URL", "postgres://u@localhost/db"]);
+    h.ok(&["rollback", "API_TOKEN", "--in", "dev"]);
+    h.ok(&["ls", "dev", "--show"]);
+    h.ok(&["run", "dev", "--", "node"]);
+    h.ok(&["export", "dev"]);
+    h.ok(&["ls", "dev"]);
+
+    let actions: Vec<String> = h
+        .audit_events(PROJECT_ID)
+        .into_iter()
+        .map(|e| e.action)
+        .collect();
+    assert_eq!(
+        actions,
+        vec!["set", "set", "set", "rollback", "show", "run", "export"],
+        "masked ls exposes nothing and is not recorded"
+    );
+
+    let out = h.ok(&["audit"]);
+    assert!(
+        out.contains("tester  rollback  [dev]  API_TOKEN@1"),
+        "{out}"
+    );
+    assert!(out.contains("7 event(s); the log is intact."), "{out}");
+    let log =
+        std::fs::read_to_string(h.path(&format!(".envy-data/audit/{PROJECT_ID}.jsonl"))).unwrap();
+    for value in [FIRST, SECOND, "postgres://"] {
+        assert!(
+            !log.contains(value) && !out.contains(value),
+            "{value} leaked"
+        );
+    }
+}
+
+#[test]
+fn a_modified_audit_log_is_reported() {
+    let h = twice_set();
+    h.ok(&["rm", "API_TOKEN", "--from", "dev"]);
+    h.ok(&["set", "dev", "DATABASE_URL", "postgres://u@localhost/db"]);
+    let path = h.path(&format!(".envy-data/audit/{PROJECT_ID}.jsonl"));
+    let log = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, log.replacen("\"rm\"", "\"set\"", 1)).unwrap();
+
+    // The edited third line still points at the second; the fourth no longer matches it.
+    let (result, out) = h.run_output(&["audit"]);
+    let err = format!("{:#}", result.unwrap_err());
+    assert!(err.contains("modified at or after line 3"), "{err}");
+    assert_eq!(
+        out.lines().count(),
+        2,
+        "only the events before the edit: {out}"
+    );
+}

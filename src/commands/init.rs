@@ -75,6 +75,7 @@ pub fn run(ctx: &Context, args: &InitArgs, out: &mut dyn Write) -> Result<()> {
 
     let mut stored = 0usize;
     for (environment, pairs) in &to_store {
+        let mut keys = Vec::new();
         for (key, value) in pairs.iter().filter(|(_, v)| !v.is_empty()) {
             ctx.vault.set(
                 &envy.id,
@@ -83,7 +84,11 @@ pub fn run(ctx: &Context, args: &InitArgs, out: &mut dyn Write) -> Result<()> {
                 &Secret::new(value.clone()),
                 ctx.change(&envy),
             )?;
-            stored += 1;
+            keys.push(key.clone());
+        }
+        stored += keys.len();
+        if !keys.is_empty() {
+            ctx.record(&envy, "init", Some(environment), keys)?;
         }
     }
 
