@@ -8,7 +8,7 @@ use crate::{
     envy::{Envy, GLOBAL_ENV},
     protect,
     resolver::Resolver,
-    workspace,
+    rotation, workspace,
 };
 
 /// What a successful check prints: a summary and warnings that do not fail it.
@@ -102,6 +102,12 @@ fn warnings(ctx: &Context, envy: &Envy, environments: &[&str]) -> Result<Vec<Str
                 ));
             }
         }
+        warnings.extend(rotation::overdue(
+            envy,
+            ctx.vault,
+            environment,
+            ctx.clock.now(),
+        )?);
     }
     Ok(warnings)
 }

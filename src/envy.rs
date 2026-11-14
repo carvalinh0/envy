@@ -13,6 +13,7 @@ use sha3::{Digest, Sha3_256};
 use uuid::Uuid;
 
 use crate::{
+    clock,
     schema::EnvironmentTypes,
     vault::{DEFAULT_KEEP, MAX_KEEP},
 };
@@ -26,6 +27,15 @@ pub struct VarDetail {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotate: Option<RotatePolicy>,
+}
+
+/// How often a value should be replaced. Envy only warns; it never changes a value by itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RotatePolicy {
+    /// A duration such as `90d` (see [`clock::parse_duration`]).
+    pub every: String,
 }
 
 /// How many older values of each variable the vault keeps (for `envy rollback`).
@@ -396,6 +406,11 @@ impl Envy {
         }
         let kind = EnvironmentTypes::parse_type(&detail.kind)
             .with_context(|| format!("Invalid type in '{key}' (environment '{env_name}')"))?;
+        if let Some(rotate) = &detail.rotate {
+            clock::parse_duration(&rotate.every).with_context(|| {
+                format!("Invalid rotate.every of '{key}' (environment '{env_name}')")
+            })?;
+        }
 
         let Some(default) = &detail.default else {
             return Ok(());
@@ -424,6 +439,7 @@ mod tests {
         VarDetail {
             kind: kind.to_string(),
             default: default.map(str::to_string),
+            rotate: None,
         }
     }
 

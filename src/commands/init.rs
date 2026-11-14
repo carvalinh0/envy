@@ -51,6 +51,7 @@ pub fn run(ctx: &Context, args: &InitArgs, out: &mut dyn Write) -> Result<()> {
                 schema.entry(key.clone()).or_insert_with(|| VarDetail {
                     kind: kind.to_string(),
                     default: None,
+                    rotate: None,
                 });
             }
 

@@ -2,7 +2,7 @@ use std::io::Write;
 
 use anyhow::Result;
 
-use crate::{cli::ListArgs, context::Context, resolver::Resolver, schema::Secret};
+use crate::{cli::ListArgs, context::Context, resolver::Resolver, rotation, schema::Secret};
 
 const UNSET: &str = "<unset>";
 
@@ -41,6 +41,9 @@ pub fn run(ctx: &Context, args: &ListArgs, out: &mut dyn Write) -> Result<()> {
     let shown: Vec<String> = rows.iter().map(|row| row.0.clone()).collect();
     for (key, kind, value) in rows {
         writeln!(out, "{key:<key_width$}  {kind:<type_width$}  {value}")?;
+    }
+    for warning in rotation::overdue(&envy, ctx.vault, &environment, ctx.clock.now())? {
+        writeln!(out, "warning: {warning}")?;
     }
     if args.show {
         ctx.record(&envy, "show", Some(&environment), shown)?;
