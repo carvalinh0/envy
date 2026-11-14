@@ -338,6 +338,27 @@ envy update
 
 > Prebuilt binaries are published for Linux x86_64 and Windows x86_64; on other platforms `envy update` only works for Cargo installs.
 
+### Upgrading to 3.0
+
+**Command line users:** nothing to do. Every command, flag, manifest, keyring entry and bundle of 2.x
+keeps working; the new manifest keys (`history`, `protected`, `rotate`) are optional and a manifest
+without them keeps its checksum. Two things to know:
+
+- Values stored by 2.x have no recorded date, so `envy history` shows "unknown" for them until they
+  change, and `rotate.every` asks you to rotate them once.
+- An Envy 2.x that rewrites a 3.0 manifest drops the new keys. Values of protected environments stay
+  encrypted, but update every machine of the team to 3.0 before protecting an environment.
+
+**Library users (`dot-envy` crate):** the Rust API changed.
+
+- `SecretVault::set` takes a `vault::Change` (`at`, `keep`) after the value, and the trait gained
+  `history` and `get_version`. A custom vault can implement `vault::CredentialStore` instead (flat
+  `namespace + user -> value` entries) and get the whole trait, history included.
+- `Context` gained `backends`, `clock` and `audit`; `Config` gained `user`, `data_dir`,
+  `protect_password` and `vault_password` (`Config::new` fills them with defaults).
+- `Envy` gained `history` and `protected`, `Bundle` gained `expires_at` and `VarDetail` gained
+  `rotate` (empty or `None` behave like 2.x).
+
 ## Explaining the envy.json Manifest File
 
 When you use `envy init` it automatically detects `.env.<environment>` files in your current folder and
