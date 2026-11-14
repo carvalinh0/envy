@@ -22,10 +22,13 @@ aes-gcm = "0.11.1"
 argon2 = { version = "0.6.0", default-features = false, features = ["alloc", "zeroize"] }
 anyhow = "1.0.104"
 base64 = "0.23.1"
+chacha20poly1305 = "0.11.0"
 chrono = { version = "0.4.45", features = ["serde"] }
 clap = { version = "4.6.7", features = ["derive"] }
 cron = "0.17.0"
 flate2 = "1.1.10"
+hkdf = "0.13.0"
+hmac = "0.13.0"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 rpassword = "7"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -36,6 +39,7 @@ tar = "0.4.46"
 ureq = { version = "3.4.2", features = ["platform-verifier"] }
 url = "2.5.8"
 uuid = { version = "1.27.0", features = ["v4"] }
+x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }
 zeroize = { version = "1", features = ["serde"] }
 zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 
