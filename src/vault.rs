@@ -304,6 +304,44 @@ impl CredentialStore for KeyringVault {
     }
 }
 
+/// Stands in for a backend this build does not have yet (`--backend file`). Commands that
+/// never touch a value (`version`, `update`, `diff`, ...) keep working; the others fail
+/// with a clear message instead of silently falling back to another backend.
+pub struct UnavailableVault {
+    pub backend: &'static str,
+}
+
+impl UnavailableVault {
+    fn fail<T>(&self) -> Result<T> {
+        anyhow::bail!(
+            "The {} backend is not available in this version of Envy. Use the keyring (the default).",
+            self.backend
+        )
+    }
+}
+
+impl SecretVault for UnavailableVault {
+    fn get(&self, _: &str, _: &str, _: &str) -> Result<Option<Secret>> {
+        self.fail()
+    }
+
+    fn set(&self, _: &str, _: &str, _: &str, _: &Secret, _: Change) -> Result<()> {
+        self.fail()
+    }
+
+    fn delete(&self, _: &str, _: &str, _: &str) -> Result<bool> {
+        self.fail()
+    }
+
+    fn history(&self, _: &str, _: &str, _: &str) -> Result<Vec<Version>> {
+        self.fail()
+    }
+
+    fn get_version(&self, _: &str, _: &str, _: &str, _: u32) -> Result<Option<Secret>> {
+        self.fail()
+    }
+}
+
 /// Volatile vault. Nothing is persisted; values are wiped when dropped.
 #[derive(Default)]
 pub struct MemoryVault {
@@ -450,6 +488,14 @@ mod tests {
             .set("p", "dev", "K", &Secret::new("v2"), change(20))
             .unwrap();
         assert_eq!(vault.len(), 1);
+    }
+
+    #[test]
+    fn an_unavailable_backend_fails_every_access_with_its_name() {
+        let vault = UnavailableVault { backend: "file" };
+        let err = vault.get("p", "dev", "K").unwrap_err().to_string();
+        assert!(err.contains("The file backend is not available"), "{err}");
+        assert!(vault.delete("p", "dev", "K").is_err());
     }
 
     #[test]

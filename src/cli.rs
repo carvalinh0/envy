@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use anyhow::{Result, bail};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// Validate, edit and securely share environment variables
 #[derive(Debug, Parser)]
@@ -10,8 +11,42 @@ pub struct Cli {
     #[arg(short = 'C', value_name = "DIR", global = true)]
     pub directory: Option<PathBuf>,
 
+    /// Where the values are stored (default: keyring, or ENVY_BACKEND)
+    #[arg(long, value_enum, global = true)]
+    pub backend: Option<Backend>,
+
     #[command(subcommand)]
     pub command: Commands,
+}
+
+/// Storage of the values. Only the keyring exists so far; the others are reserved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Backend {
+    /// The operating system keyring
+    Keyring,
+    /// An encrypted file (not available yet)
+    File,
+    /// An Envy server (not available yet)
+    Remote,
+}
+
+impl Backend {
+    /// The flag wins, then `ENVY_BACKEND`, then the keyring. Nothing configured behaves
+    /// exactly like the releases before backends could be chosen.
+    pub fn resolve(flag: Option<Backend>, from_env: Option<&str>) -> Result<Backend> {
+        if let Some(backend) = flag {
+            return Ok(backend);
+        }
+        match from_env.filter(|value| !value.is_empty()) {
+            None => Ok(Backend::Keyring),
+            Some(value) => match Backend::from_str(value, true) {
+                Ok(backend) => Ok(backend),
+                Err(_) => {
+                    bail!("ENVY_BACKEND='{value}' is not valid. Use keyring, file or remote.")
+                }
+            },
+        }
+    }
 }
 
 /// The main commands of the application
@@ -218,4 +253,33 @@ pub struct RollbackArgs {
 #[derive(Debug, Args)]
 pub struct ProtectArgs {
     pub environment: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_flag_wins_over_the_environment_variable() {
+        assert_eq!(
+            Backend::resolve(Some(Backend::File), Some("remote")).unwrap(),
+            Backend::File
+        );
+        assert_eq!(
+            Backend::resolve(None, Some("Remote")).unwrap(),
+            Backend::Remote
+        );
+    }
+
+    #[test]
+    fn nothing_configured_means_the_keyring() {
+        assert_eq!(Backend::resolve(None, None).unwrap(), Backend::Keyring);
+        assert_eq!(Backend::resolve(None, Some("")).unwrap(), Backend::Keyring);
+    }
+
+    #[test]
+    fn an_unknown_backend_is_an_error() {
+        let err = Backend::resolve(None, Some("s3")).unwrap_err().to_string();
+        assert!(err.contains("ENVY_BACKEND='s3'"), "{err}");
+    }
 }

@@ -4,7 +4,7 @@ use dot_envy::{
     app,
     audit::FileAudit,
     bundle::AesGcmCodec,
-    cli::{Cli, Commands},
+    cli::{Backend, Cli, Commands},
     clock::SystemClock,
     config::Config,
     context::Context,
@@ -13,7 +13,7 @@ use dot_envy::{
     runner::SystemRunner,
     state::FileState,
     update::{GithubReleases, SystemUpdater},
-    vault::KeyringVault,
+    vault::{KeyringVault, SecretVault, UnavailableVault},
 };
 
 fn main() {
@@ -37,14 +37,19 @@ fn execute(cli: Cli) -> anyhow::Result<i32> {
         Commands::Init(_) => config,
         _ => config.discover(),
     };
-    let vault = KeyringVault::default();
+    let backend = Backend::resolve(cli.backend, std::env::var("ENVY_BACKEND").ok().as_deref())?;
+    let vault: Box<dyn SecretVault> = match backend {
+        Backend::Keyring => Box::new(KeyringVault::default()),
+        Backend::File => Box::new(UnavailableVault { backend: "file" }),
+        Backend::Remote => Box::new(UnavailableVault { backend: "remote" }),
+    };
     let audit = FileAudit::new(config.data_dir.clone());
     let state = FileState::new(config.state_path());
     let releases = GithubReleases::from_package()?;
     let updater = SystemUpdater::from_environment(&SystemRunner);
     let ctx = Context {
         config: &config,
-        vault: &vault,
+        vault: vault.as_ref(),
         state: &state,
         prompter: &TerminalPrompter,
         runner: &SystemRunner,
