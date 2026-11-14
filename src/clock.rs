@@ -40,6 +40,14 @@ pub fn parse_duration(text: &str) -> Result<Duration> {
     }
 }
 
+/// Short human form of an elapsed time: `5 hours`, `12 days`.
+pub fn describe(duration: Duration) -> String {
+    match duration.num_days() {
+        0 => format!("{} hour(s)", duration.num_hours().max(0)),
+        days => format!("{days} day(s)"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,5 +74,11 @@ mod tests {
         ] {
             assert!(parse_duration(text).is_err(), "{text:?} should be rejected");
         }
+    }
+
+    #[test]
+    fn elapsed_time_is_described_in_days_or_hours() {
+        assert_eq!(describe(Duration::hours(5)), "5 hour(s)");
+        assert_eq!(describe(Duration::days(120)), "120 day(s)");
     }
 }

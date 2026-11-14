@@ -329,6 +329,7 @@ pub fn var(kind: &str, default: Option<&str>) -> VarDetail {
     VarDetail {
         kind: kind.to_string(),
         default: default.map(str::to_string),
+        rotate: None,
     }
 }
 

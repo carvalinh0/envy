@@ -144,6 +144,7 @@ mod tests {
         VarDetail {
             kind: kind.into(),
             default: default.map(str::to_string),
+            rotate: None,
         }
     }
 

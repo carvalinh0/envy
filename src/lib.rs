@@ -17,6 +17,7 @@ pub mod inference;
 pub mod prompt;
 pub mod protect;
 pub mod resolver;
+pub mod rotation;
 pub mod runner;
 pub mod schema;
 pub mod state;

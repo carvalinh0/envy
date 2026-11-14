@@ -259,6 +259,7 @@ fn diff_reports_type_differences_and_additions() {
         dot_envy::envy::VarDetail {
             kind: "string".into(),
             default: None,
+            rotate: None,
         },
     );
     envy.sync().unwrap();
@@ -517,4 +518,63 @@ fn a_global_vault_value_is_inherited_by_every_environment() {
         prod.contains("prod-only") && !prod.contains("shared"),
         "{prod}"
     );
+}
+
+// ---------- rotate.every ----------
+
+fn with_rotation(h: &Harness) {
+    let mut envy = h.manifest();
+    envy.schemas
+        .get_mut("dev")
+        .unwrap()
+        .get_mut("API_TOKEN")
+        .unwrap()
+        .rotate = Some(dot_envy::envy::RotatePolicy {
+        every: "30d".into(),
+    });
+    envy.sync().unwrap();
+    envy.save(&h.config.manifest_path()).unwrap();
+}
+
+#[test]
+fn check_and_ls_warn_about_values_due_for_rotation() {
+    let h = ready();
+    with_rotation(&h);
+    assert!(!h.ok(&["check", "dev"]).contains("warning"));
+
+    h.clock.advance(chrono::Duration::days(45));
+    let out = h.ok(&["check", "dev"]);
+    assert!(
+        out.contains(
+            "warning: 'API_TOKEN' in 'dev' was last changed 45 day(s) ago; rotate it every 30d."
+        ),
+        "{out}"
+    );
+    assert!(
+        out.contains("All good"),
+        "a due rotation does not fail the check: {out}"
+    );
+    assert!(!out.contains("DATABASE_URL' in 'dev' was"), "{out}");
+    assert!(h.ok(&["ls", "dev"]).contains("warning: 'API_TOKEN'"));
+
+    h.ok(&["set", "dev", "API_TOKEN", "rotated"]);
+    assert!(!h.ok(&["check", "dev"]).contains("warning"));
+}
+
+#[test]
+fn an_invalid_rotation_period_is_a_schema_error() {
+    let h = ready();
+    let mut envy = h.manifest();
+    envy.schemas
+        .get_mut("dev")
+        .unwrap()
+        .get_mut("API_TOKEN")
+        .unwrap()
+        .rotate = Some(dot_envy::envy::RotatePolicy {
+        every: "monthly".into(),
+    });
+    envy.sync().unwrap();
+    envy.save(&h.config.manifest_path()).unwrap();
+    let err = h.err(&["check", "dev"]);
+    assert!(err.contains("Invalid rotate.every of 'API_TOKEN'"), "{err}");
 }
