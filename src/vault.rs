@@ -21,6 +21,7 @@
 #[cfg(test)]
 pub(crate) mod conformance;
 mod file;
+pub mod format;
 
 pub use file::EncryptedFileVault;
 
@@ -43,6 +44,8 @@ pub const MAX_KEEP: usize = 20;
 pub enum Namespace {
     Values,
     History,
+    /// The member identity of each Envy server (service `envy-identity`, user = server URL).
+    Identity,
 }
 
 /// Flat `namespace + user -> value` storage, the shape of an operating system keyring.
@@ -251,10 +254,12 @@ impl<S: CredentialStore> SecretVault for S {
 }
 
 /// Vault backed by the operating system keyring (Secret Service, Keychain, Credential Manager).
+#[cfg(feature = "keyring")]
 pub struct KeyringVault {
     service: String,
 }
 
+#[cfg(feature = "keyring")]
 impl KeyringVault {
     pub const DEFAULT_SERVICE: &'static str = "envy";
 
@@ -268,6 +273,7 @@ impl KeyringVault {
         match namespace {
             Namespace::Values => self.service.clone(),
             Namespace::History => format!("{}-history", self.service),
+            Namespace::Identity => format!("{}-identity", self.service),
         }
     }
 
@@ -277,12 +283,14 @@ impl KeyringVault {
     }
 }
 
+#[cfg(feature = "keyring")]
 impl Default for KeyringVault {
     fn default() -> Self {
         Self::new(Self::DEFAULT_SERVICE)
     }
 }
 
+#[cfg(feature = "keyring")]
 impl CredentialStore for KeyringVault {
     fn read(&self, namespace: Namespace, user: &str) -> Result<Option<Secret>> {
         match self.entry(namespace, user)?.get_password() {
@@ -307,9 +315,9 @@ impl CredentialStore for KeyringVault {
     }
 }
 
-/// Stands in for a backend this build does not have yet (`--backend file`). Commands that
-/// never touch a value (`version`, `update`, `diff`, ...) keep working; the others fail
-/// with a clear message instead of silently falling back to another backend.
+/// Stands in for a backend this build does not have (the keyring in the server image).
+/// Commands that never touch a value (`version`, `update`, `diff`, ...) keep working; the
+/// others fail with a clear message instead of silently falling back to another backend.
 pub struct UnavailableVault {
     pub backend: &'static str,
 }
@@ -317,7 +325,7 @@ pub struct UnavailableVault {
 impl UnavailableVault {
     fn fail<T>(&self) -> Result<T> {
         anyhow::bail!(
-            "The {} backend is not available in this version of Envy. Use the keyring (the default).",
+            "The {} backend is not available in this build of Envy.",
             self.backend
         )
     }
@@ -502,10 +510,12 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "keyring")]
     fn the_keyring_keeps_active_values_where_older_releases_read_them() {
         let vault = KeyringVault::default();
         assert_eq!(vault.service(Namespace::Values), "envy");
         assert_eq!(vault.service(Namespace::History), "envy-history");
+        assert_eq!(vault.service(Namespace::Identity), "envy-identity");
         assert_eq!(slot("p", "dev", "K"), "p/dev/K");
     }
 

@@ -59,6 +59,7 @@ fn help_lists_every_command_of_the_readme() {
         "unprotect",
         "migrate",
         "vault",
+        "serve",
     ] {
         assert!(
             out.lines().any(|l| l.trim_start().starts_with(command)),
@@ -276,7 +277,7 @@ fn a_backend_without_values_fails_only_when_values_are_needed() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "The remote backend is not available in this version",
+            "The remote backend is not available in this build",
         ));
     // The data folder is a temporary one, so the user's real vaults are never read.
     let data = tempfile::tempdir().unwrap();

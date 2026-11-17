@@ -16,14 +16,19 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
-use base64::{Engine, engine::general_purpose::STANDARD};
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use x25519_dalek::{PublicKey, StaticSecret};
 
-use super::{Change, SecretVault, Version};
+use super::{
+    Change, SecretVault, Version,
+    format::{
+        self, KeySlot, Purpose, RecordId, Sealed, b64, index_aad, names_slot, open_from, seal_to,
+        unb64, wrap_aad,
+    },
+};
 use crate::{
-    keys::{self, KdfParams, Key32, encode, int},
+    keys::{self, KdfParams, Key32, encode},
     prompt::Prompter,
     schema::Secret,
 };
@@ -57,30 +62,8 @@ struct Kdf {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Sealed {
-    nonce: String,
-    ciphertext: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 struct RecoveryPublic {
     public: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum Purpose {
-    Dek,
-    Names,
-}
-
-impl Purpose {
-    fn label(self) -> &'static [u8] {
-        match self {
-            Purpose::Dek => b"dek",
-            Purpose::Names => b"names",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,9 +99,6 @@ struct Record {
     ciphertext: String,
 }
 
-/// The plaintext keys of a wrap, the identity of the wrap and what it protects.
-type KeySlot = (Purpose, String, u32);
-
 /// A vault file opened with its keys.
 struct Opened {
     file: VaultFile,
@@ -127,16 +107,6 @@ struct Opened {
     kek: Key32,
     keys: BTreeMap<KeySlot, Key32>,
     names: BTreeMap<String, String>,
-}
-
-fn b64(bytes: &[u8]) -> String {
-    STANDARD.encode(bytes)
-}
-
-fn unb64(text: &str) -> Result<Vec<u8>> {
-    STANDARD
-        .decode(text)
-        .map_err(|_| anyhow!("The file vault is corrupted (invalid base64)."))
 }
 
 fn digest(bytes: &[u8]) -> String {
@@ -148,45 +118,17 @@ fn kek_check_aad(project: &str) -> Vec<u8> {
     encode(&[b"envy-kek-check-v1", project.as_bytes()])
 }
 
-fn index_aad(project: &str) -> Vec<u8> {
-    encode(&[b"envy-index-v1", project.as_bytes()])
-}
-
-fn wrap_aad(project: &str, (purpose, env, key_id): &KeySlot, member: &str) -> Vec<u8> {
-    encode(&[
-        b"envy-wrap-v1",
-        project.as_bytes(),
-        purpose.label(),
-        env.as_bytes(),
-        &int(i64::from(*key_id)),
-        member.as_bytes(),
-    ])
-}
-
 fn record_aad(project: &str, record: &Record) -> Vec<u8> {
-    encode(&[
-        b"envy-record-v1",
-        project.as_bytes(),
-        record.env.as_bytes(),
-        record.key.as_bytes(),
-        &int(i64::from(record.version)),
-        &int(i64::from(record.key_id)),
-        &int(record.created_at),
-    ])
-}
-
-fn seal_to(key: &Key32, aad: &[u8], plaintext: &[u8]) -> Result<Sealed> {
-    let (nonce, ciphertext) = keys::seal(key, aad, plaintext)?;
-    Ok(Sealed {
-        nonce: b64(&nonce),
-        ciphertext: b64(&ciphertext),
-    })
-}
-
-fn open_from(key: &Key32, aad: &[u8], sealed: &Sealed) -> Option<zeroize::Zeroizing<Vec<u8>>> {
-    let nonce = unb64(&sealed.nonce).ok()?;
-    let ciphertext = unb64(&sealed.ciphertext).ok()?;
-    keys::open(key, aad, &nonce, &ciphertext)
+    format::record_aad(
+        project,
+        &RecordId {
+            env: &record.env,
+            key: &record.key,
+            version: record.version,
+            key_id: record.key_id,
+            created_at: record.created_at,
+        },
+    )
 }
 
 fn recovery_public(file: &VaultFile) -> Result<PublicKey> {
@@ -232,10 +174,6 @@ fn wraps_for(
 
 fn slot_of(wrap: &Wrap) -> KeySlot {
     (wrap.purpose, wrap.env.clone(), wrap.key_id)
-}
-
-fn names_slot() -> KeySlot {
-    (Purpose::Names, String::new(), 1)
 }
 
 /// Unwraps every key for `member`; `unwrap` opens one wrap.
