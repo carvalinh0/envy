@@ -3,7 +3,8 @@
 # docker run -v envy-data:/data -p 8443:8443 --read-only ghcr.io/carvalinh0/envy \
 #     --listen 0.0.0.0:8443 --tls-cert /tls/cert.pem --tls-key /tls/key.pem
 
-FROM rust:1.89-alpine AS build
+# Pinned to a digest so a moved tag can't change what builds the release; update both together.
+FROM rust:1.89-alpine@sha256:4b800f2e72e04be908e5f634c504c741bd943b763d1d8ad7b096cc340e1b5b46 AS build
 RUN apk add --no-cache musl-dev gcc
 WORKDIR /src
 COPY . .
@@ -30,4 +31,7 @@ USER 65532:65532
 VOLUME /data
 EXPOSE 8443
 ENTRYPOINT ["/envy", "serve", "--data", "/data"]
-CMD ["--listen", "0.0.0.0:8443", "--behind-proxy"]
+# No --behind-proxy by default: without TLS the server then refuses to start, instead of
+# serving plain http on every interface and trusting X-Forwarded-For from anyone who reaches
+# the port. Pass --tls-cert/--tls-key, or --behind-proxy when a TLS proxy is in front.
+CMD ["--listen", "0.0.0.0:8443"]

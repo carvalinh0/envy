@@ -2,7 +2,7 @@
 
 use std::{fmt, net::IpAddr, str::FromStr};
 
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use base64::Engine;
 use url::Url;
 use uuid::Uuid;
@@ -159,9 +159,14 @@ impl EnvironmentTypes {
         }
     }
 
-    /// Checks that `value` is valid for `kind` without keeping the parsed result.
+    /// Checks that `value` is valid for `kind` without keeping the parsed result. The error
+    /// never quotes the value: some parsers echo their input (cron the whole expression,
+    /// uuid and base64 a character), and `envy check` and `envy run` print it, often in a
+    /// CI log.
     pub fn validate(value: &str, kind: EnvironmentTypes) -> Result<()> {
-        Self::parse_value(value, kind).map(|_| ())
+        Self::parse_value(value, kind)
+            .map(|_| ())
+            .map_err(|_| anyhow!("the value can't be read as {kind}"))
     }
 }
 
@@ -223,6 +228,27 @@ mod tests {
             assert!(
                 EnvironmentTypes::parse_value("wrong", kind).is_err(),
                 "{kind} accepted an invalid value"
+            );
+        }
+    }
+
+    #[test]
+    fn validation_errors_never_quote_the_value() {
+        use EnvironmentTypes::*;
+        for (value, kind) in [
+            ("p@ss w0rd x y z", Cron),
+            ("Secret-n0t-valid", Uuid),
+            ("s3cr3t$hunter2", Base64),
+        ] {
+            let err = EnvironmentTypes::validate(value, kind)
+                .unwrap_err()
+                .to_string();
+            for fragment in value.split([' ', '-', '$']).filter(|f| f.len() > 2) {
+                assert!(!err.contains(fragment), "{kind}: {err}");
+            }
+            assert!(
+                !err.contains('`') && !err.contains("offset"),
+                "{kind}: {err}"
             );
         }
     }

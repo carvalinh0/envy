@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use crate::{
     clock,
+    protect::CHECK_SLOT,
     schema::EnvironmentTypes,
     vault::{DEFAULT_KEEP, MAX_KEEP},
 };
@@ -338,6 +339,7 @@ impl Envy {
             Self::check_workspace(workspace)?;
         }
         self.check_later_keys()?;
+        self.check_keyring_entries()?;
 
         let envs_to_check: Vec<(&String, &Schema)> = match environment {
             Some(env_name) => match self.schemas.get_key_value(env_name) {
@@ -380,6 +382,27 @@ impl Envy {
             .find(|name| !self.has_environment(name))
         {
             bail!("The protected environment '{name}' does not exist.");
+        }
+        Ok(())
+    }
+
+    /// A value is stored under `{project}/{environment}/{variable}` (see `vault`), so names
+    /// with `/` can make two variables share an entry, where each would overwrite the other.
+    fn check_keyring_entries(&self) -> Result<()> {
+        let mut seen: BTreeMap<String, (&str, String)> = BTreeMap::new();
+        for environment in self.environment_names() {
+            // An empty name is refused on its own; it would only clash with the reserved slot.
+            let keys = self.effective_schema(environment)?.into_keys();
+            let keys = keys.filter(|key| !key.is_empty());
+            for key in keys.chain([CHECK_SLOT.to_string()]) {
+                let entry = format!("{environment}/{key}");
+                if let Some((other_env, other_key)) = seen.get(&entry) {
+                    bail!(
+                        "'{key}' in '{environment}' and '{other_key}' in '{other_env}' would share a keyring entry; rename one of them."
+                    );
+                }
+                seen.insert(entry, (environment, key));
+            }
         }
         Ok(())
     }
@@ -432,9 +455,14 @@ impl Envy {
                  it would be committed to Git."
             );
         }
-        EnvironmentTypes::validate(default, kind).map_err(|err| {
-            anyhow::anyhow!("The default of '{key}' in '{env_name}' is not a valid {kind}: {err}")
-        })
+        // Defaults are committed and never secret, so the parser's own message may quote them.
+        EnvironmentTypes::parse_value(default, kind)
+            .map(|_| ())
+            .map_err(|err| {
+                anyhow::anyhow!(
+                    "The default of '{key}' in '{env_name}' is not a valid {kind}: {err}"
+                )
+            })
     }
 }
 
@@ -614,6 +642,28 @@ mod tests {
         envy.check_schema(None, None).unwrap();
         envy.check_schema(Some("dev"), None).unwrap();
         envy.check_schema(Some("dev"), Some("PORT")).unwrap();
+    }
+
+    #[test]
+    fn variables_that_would_share_a_keyring_entry_are_refused() {
+        let mut envy = sample();
+        envy.schemas.insert(
+            "dev/eu".into(),
+            Schema::from([("PORT".to_string(), var("port", None))]),
+        );
+        envy.check_schema(None, None).unwrap();
+
+        envy.schemas
+            .get_mut("dev")
+            .unwrap()
+            .insert("eu/PORT".to_string(), var("port", None));
+        let err = envy.check_schema(None, None).unwrap_err().to_string();
+        assert!(err.contains("'eu/PORT' in 'dev'"), "{err}");
+        assert!(err.contains("'PORT' in 'dev/eu'"), "{err}");
+        assert!(
+            envy.check_schema(Some("prod"), None).is_err(),
+            "the whole manifest shares one keyring"
+        );
     }
 
     #[test]

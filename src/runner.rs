@@ -15,24 +15,40 @@ pub trait ProcessRunner {
     fn run(&self, program: &str, args: &[String], envs: &[(String, Secret)]) -> Result<i32>;
 }
 
+/// Envy's own credentials, read from its environment. The child gets the values of one
+/// environment, not the keys to every environment (an identity reads all it was granted, the
+/// passwords open every protected environment and the file vault), so they are removed unless
+/// the manifest declares a variable with that name.
+const CREDENTIALS: [&str; 3] = [
+    "ENVY_IDENTITY",
+    "ENVY_VAULT_PASSWORD",
+    "ENVY_PROTECT_PASSWORD",
+];
+
+fn command(program: &str, args: &[String], envs: &[(String, Secret)]) -> Command {
+    #[cfg(windows)]
+    let mut command = Command::new(find_in_path(
+        program,
+        std::env::var_os("PATH"),
+        std::env::var("PATHEXT").ok(),
+    ));
+    #[cfg(not(windows))]
+    let mut command = Command::new(program);
+    command.args(args);
+    for name in CREDENTIALS {
+        command.env_remove(name);
+    }
+    for (key, value) in envs {
+        command.env(key, value.expose_secret());
+    }
+    command
+}
+
 pub struct SystemRunner;
 
 impl ProcessRunner for SystemRunner {
     fn run(&self, program: &str, args: &[String], envs: &[(String, Secret)]) -> Result<i32> {
-        #[cfg(windows)]
-        let mut command = Command::new(find_in_path(
-            program,
-            std::env::var_os("PATH"),
-            std::env::var("PATHEXT").ok(),
-        ));
-        #[cfg(not(windows))]
-        let mut command = Command::new(program);
-        command.args(args);
-        for (key, value) in envs {
-            command.env(key, value.expose_secret());
-        }
-
-        let status = command
+        let status = command(program, args, envs)
             .status()
             .with_context(|| format!("Could not start '{program}'"))?;
 
@@ -69,6 +85,39 @@ fn find_in_path(program: &str, path: Option<OsString>, pathext: Option<String>) 
         }
     }
     given.to_path_buf()
+}
+
+#[cfg(test)]
+mod environment_tests {
+    use super::*;
+
+    #[test]
+    fn envys_own_credentials_never_reach_the_child() {
+        let envs = vec![("API_TOKEN".to_string(), Secret::new("t"))];
+        let command = command("node", &[], &envs);
+        let set: Vec<_> = command.get_envs().collect();
+        for name in CREDENTIALS {
+            assert!(
+                set.contains(&(std::ffi::OsStr::new(name), None)),
+                "{name} is not removed"
+            );
+        }
+        assert!(set.contains(&(
+            std::ffi::OsStr::new("API_TOKEN"),
+            Some(std::ffi::OsStr::new("t"))
+        )));
+    }
+
+    #[test]
+    fn a_declared_variable_with_the_same_name_still_reaches_it() {
+        let envs = vec![("ENVY_IDENTITY".to_string(), Secret::new("declared"))];
+        let command = command("node", &[], &envs);
+        let identity = command
+            .get_envs()
+            .find(|(name, _)| *name == "ENVY_IDENTITY")
+            .and_then(|(_, value)| value);
+        assert_eq!(identity, Some(std::ffi::OsStr::new("declared")));
+    }
 }
 
 #[cfg(test)]

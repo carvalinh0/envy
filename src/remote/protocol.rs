@@ -175,6 +175,10 @@ impl ApiError {
 pub struct ServerInfo {
     pub server_id: String,
     pub version: String,
+    /// Whether the server takes grants with a `version`. A 4.0 server drops the field and
+    /// then refuses their signature, so clients only send versioned grants when this is set.
+    #[serde(default)]
+    pub versioned_grants: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,6 +232,15 @@ pub struct Access {
     pub keys: MemberKeys,
     pub approver: String,
     pub signature: String,
+    /// Grows each time the member's access to `env` is given again. Clients remember the
+    /// highest one they saw, so a server can't bring back a grant that was replaced. `0`: a
+    /// grant from 4.0, which had none.
+    #[serde(default, skip_serializing_if = "unversioned")]
+    pub version: u64,
+}
+
+fn unversioned(version: &u64) -> bool {
+    *version == 0
 }
 
 /// What a member sees of a project: the full head and access list, its own wraps and the
@@ -322,17 +335,26 @@ pub fn session_message(server_id: &str, name: &str, nonce: &str) -> Vec<u8> {
     ])
 }
 
+/// A grant without a version keeps the bytes 4.0 signed; a versioned one has its own label, so
+/// neither verifies as the other.
 pub fn grant_message(project: &str, access: &Access) -> Vec<u8> {
-    encode(&[
+    let write = int(i64::from(access.write));
+    let version = int(i64::try_from(access.version).unwrap_or(i64::MAX));
+    let mut fields: Vec<&[u8]> = vec![
         b"envy-grant-v1",
         project.as_bytes(),
         access.member.as_bytes(),
         access.env.as_bytes(),
-        &int(i64::from(access.write)),
+        &write,
         access.keys.x25519.as_bytes(),
         access.keys.ed25519.as_bytes(),
         access.approver.as_bytes(),
-    ])
+    ];
+    if access.version != 0 {
+        fields[0] = b"envy-grant-v2";
+        fields.push(&version);
+    }
+    encode(&fields)
 }
 
 pub fn recovery_message(project: &str, recovery: &SignedRecovery) -> Vec<u8> {
@@ -424,6 +446,58 @@ mod tests {
         assert_ne!(
             a,
             head_message("q", &head(&[("dev", "ab", 1), ("dev", "c", 1)]))
+        );
+    }
+
+    fn access(version: u64) -> Access {
+        Access {
+            member: "ana".into(),
+            env: "dev".into(),
+            write: true,
+            keys: MemberKeys {
+                x25519: "x".into(),
+                ed25519: "e".into(),
+            },
+            approver: "admin".into(),
+            signature: String::new(),
+            version,
+        }
+    }
+
+    #[test]
+    fn an_unversioned_grant_signs_the_bytes_of_4_0() {
+        let legacy = encode(&[
+            b"envy-grant-v1",
+            b"p",
+            b"ana",
+            b"dev",
+            &int(1),
+            b"x",
+            b"e",
+            b"admin",
+        ]);
+        assert_eq!(grant_message("p", &access(0)), legacy);
+        assert_ne!(grant_message("p", &access(1)), legacy);
+        assert_ne!(
+            grant_message("p", &access(1)),
+            grant_message("p", &access(2))
+        );
+    }
+
+    #[test]
+    fn grants_without_a_version_keep_their_json() {
+        let json = serde_json::to_value(access(0)).unwrap();
+        assert!(json.get("version").is_none(), "{json}");
+        let old: Access = serde_json::from_str(
+            r#"{"member":"ana","env":"dev","write":true,"keys":{"x25519":"x","ed25519":"e"},"approver":"admin","signature":""}"#,
+        )
+        .unwrap();
+        assert_eq!(old, access(0));
+        let info: ServerInfo =
+            serde_json::from_str(r#"{"server_id":"s","version":"4.0.0"}"#).unwrap();
+        assert!(
+            !info.versioned_grants,
+            "a 4.0 server only takes unversioned grants"
         );
     }
 

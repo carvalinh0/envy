@@ -86,6 +86,12 @@ pub trait ServerStore: Send + Sync {
         state: &ProjectState,
     ) -> Result<bool>;
 
+    /// Removes a project and its access in one step; the audit keeps its history. Returns
+    /// whether it existed. Only the host operator calls it (`envy serve --remove-project`).
+    fn delete_project(&self, id: &str) -> Result<bool> {
+        anyhow::bail!("This store can't remove the project '{id}'.")
+    }
+
     fn append_audit(&self, entry: &AuditEntry) -> Result<()>;
     fn audit(&self, project: Option<&str>) -> Result<Vec<AuditEntry>>;
 }
@@ -136,6 +142,7 @@ pub(crate) fn conformance(store: &dyn ServerStore) {
         },
         approver: "admin".into(),
         signature: "s".into(),
+        version: 0,
     };
     store.set_access("p", &read).unwrap();
     store
@@ -185,6 +192,16 @@ pub(crate) fn conformance(store: &dyn ServerStore) {
     );
     assert!(store.put_project("p", Some(1), &next).unwrap());
     assert_eq!(store.project("p").unwrap(), Some(next));
+
+    assert!(store.put_project("squatted", None, &state).unwrap());
+    store.set_access("squatted", &read).unwrap();
+    assert!(store.delete_project("squatted").unwrap());
+    assert_eq!(store.project("squatted").unwrap(), None);
+    assert!(
+        store.access("squatted").unwrap().is_empty(),
+        "its access goes"
+    );
+    assert!(!store.delete_project("squatted").unwrap(), "gone already");
     assert_eq!(store.project_ids().unwrap(), vec!["p".to_string()]);
 
     let entry = |project: Option<&str>| AuditEntry {

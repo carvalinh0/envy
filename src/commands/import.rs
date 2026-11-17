@@ -14,7 +14,11 @@ pub fn run(ctx: &Context, args: &ImportArgs, out: &mut dyn Write) -> Result<()> 
 
     let path = ctx.config.base_dir.join(&args.path);
     let data = fs::read(&path).with_context(|| format!("Could not read {}", path.display()))?;
-    let bundle = ctx.codec.open(&data, &args.key)?;
+    let key = match &args.key {
+        Some(key) => Secret::new(key.as_str()),
+        None => ctx.prompter.ask_secret("Key of the bundle")?,
+    };
+    let bundle = ctx.codec.open(&data, key.expose_secret())?;
 
     if let Some(expires_at) = bundle.expires_at
         && expires_at <= ctx.clock.now()

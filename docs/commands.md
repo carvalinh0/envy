@@ -100,7 +100,8 @@ and manifests that share an id with another one.
 
 Runs a command with the values of the environment in its environment. Nothing is written to disk.
 Fails without starting the command when a value is missing or invalid; otherwise returns the
-command's exit code.
+command's exit code. Envy's own credentials (`ENVY_IDENTITY`, `ENVY_VAULT_PASSWORD`,
+`ENVY_PROTECT_PASSWORD`) are removed from the command's environment.
 
 ```bash
 envy run dev -- npm run dev
@@ -117,7 +118,8 @@ Removes the variable from the manifest and its value and versions from the vault
 ### `envy rename <old> <new>`
 
 Renames the variable in the manifest and moves its value. Its history stays with the old name and
-is removed.
+is removed. In a protected environment the value is encrypted again for its new name, which asks for
+the password.
 
 | Option | What it does |
 | :-- | :-- |
@@ -181,10 +183,11 @@ the file.
 | :-- | :-- |
 | `--ttl <duration>` | Refuse to import the bundle after this long: `12h`, `7d`, `2w`. |
 
-### `envy import <file> <key>`
+### `envy import <file> [key]`
 
 Stores the values of a bundle exported from the same project (same `id`). Values of undeclared
-variables or of the wrong type are skipped.
+variables or of the wrong type are skipped. Without `key` it is asked for without echo, which keeps it
+out of the shell history, where it would sit next to the file name.
 
 ---
 
@@ -198,12 +201,14 @@ See [backends](guides/backends.md) and [the server guide](guides/server.md).
 Copies every value and its versions to another backend, checks the copy and switches the project to
 it on this machine. The first move to `file` creates the vault (new password and recovery key); the
 first move to `remote` creates the project on the server (recovery key). When the server already has
-the project, only the values it does not have are sent.
+the project, only the values it does not have are sent, and if someone else created it this machine
+first needs their fingerprint: the creator receives every key of the project.
 
 | Option | What it does |
 | :-- | :-- |
 | `--remove-source` | Delete the values from the old backend once they are copied and checked. |
 | `--fresh` | Start the new backend empty, without reading the old one (for a machine without a keyring). |
+| `--creator <fingerprint>` | With `--to remote`: the fingerprint of whoever created the project on the server, checked with them through another channel. Only needed the first time this machine joins a project it did not create. |
 
 ### `envy vault <action>`
 
@@ -229,7 +234,7 @@ fingerprint.
 | Option | What it does |
 | :-- | :-- |
 | `--invite <code>` | Join with an invite from `envy user add`. Needs `--name`. |
-| `--root-token <token>` | Become the first admin with the token of `envy serve --init`. Needs `--name`. |
+| `--root-token <token>` | Become the first admin with the token of `envy serve --init`. Needs `--name` and the URL on the command line (never the manifest's `server`). |
 | `--name <name>` | Your member name: letters, digits, `.`, `_` and `-`. |
 | `--print-identity` | Print the new identity once instead of storing it in the keyring (for CI secrets). |
 
@@ -260,11 +265,12 @@ Runs an Envy server. Only in Linux builds with the `server` feature and in the D
 | `--data <dir>` | Folder of the database (default `envy-data`). |
 | `--listen <address>` | Address to listen on (default `127.0.0.1:8443`). |
 | `--tls-cert <file>` `--tls-key <file>` | Serve https with this certificate and key (PEM). |
-| `--behind-proxy` | Plain http on any address, for a TLS proxy in front; client addresses come from `X-Forwarded-For`. |
+| `--behind-proxy` | Plain http on any address, for a TLS proxy in front; the client address is the last one in `X-Forwarded-For` (the one the proxy added). Keep the port reachable only by the proxy. |
 | `--session-ttl <hours>` | How long a login lasts (default 12). |
 | `--init` | Prepare an empty data folder and print the root token once. |
 | `--init-output <file>` | With `--init`: write the root token to this new file instead. |
 | `--new-root-token` | Print a root token for an existing server, to add an admin. |
+| `--remove-project <id>` | Remove a project and its access from the server and exit, freeing its id. Its values are lost. Only on the host: no request does this. |
 
 Without a certificate the server refuses to listen anywhere but a loopback address unless
 `--behind-proxy` is given.

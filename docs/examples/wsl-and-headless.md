@@ -56,4 +56,4 @@ Mount a volume on the data folder so the vault survives rebuilds, for example in
 ```
 
 On a team with an [Envy server](../guides/server.md), `envy login` and `envy migrate --to remote`
-avoid the vault altogether: values stay on the server and each member has their own identity.
+(with `--creator` when someone else created the project) avoid the vault altogether: values stay on the server and each member has their own identity.

@@ -2,7 +2,7 @@ mod common;
 
 use common::{Harness, PROJECT_ID, SERVER, recovery_words};
 use dot_envy::{
-    remote::protocol::{MemberKeys, MemberStatus},
+    remote::protocol::{Access, MemberKeys, MemberStatus, grant_message},
     schema::Secret,
 };
 
@@ -43,6 +43,17 @@ fn invited(admin: &Harness, name: &str) -> (Harness, String) {
     let out = other.ok(&["login", SERVER, "--invite", &invite, "--name", name]);
     let fingerprint = line_after(&out, "Fingerprint: ");
     (other, fingerprint)
+}
+
+fn fingerprint_of(h: &Harness, name: &str) -> String {
+    let member = h.server.store().member(name).unwrap().unwrap();
+    member.keys.unwrap().decode().unwrap().fingerprint()
+}
+
+/// A teammate moves its copy of the project to the server, after checking who created it.
+fn join_project(h: &Harness, creator: &str) -> String {
+    let fingerprint = fingerprint_of(h, creator);
+    h.ok(&["migrate", "--to", "remote", "--creator", &fingerprint])
 }
 
 fn project_state(h: &Harness) -> String {
@@ -99,6 +110,19 @@ fn the_root_token_works_once() {
 }
 
 #[test]
+fn a_root_token_only_goes_to_a_url_given_on_the_command_line() {
+    let h = Harness::with_manifest();
+    let mut envy = common::sample_envy();
+    envy.server = Some(SERVER.into());
+    envy.save(&h.config.manifest_path()).unwrap();
+    let root = h.root_token.clone();
+    let err = h.err(&["login", "--root-token", &root, "--name", "admin"]);
+    assert!(err.contains("envy login <url> --root-token"), "{err}");
+    assert!(!err.contains(&root), "{err}");
+    h.ok(&["login", SERVER, "--root-token", &root, "--name", "admin"]);
+}
+
+#[test]
 fn login_needs_an_identity_and_https() {
     let h = Harness::with_manifest();
     let err = h.err(&["login", SERVER]);
@@ -110,6 +134,47 @@ fn login_needs_an_identity_and_https() {
 }
 
 // ---------- members ----------
+
+#[test]
+fn joining_a_project_someone_else_created_needs_its_fingerprint() {
+    let (admin, _) = admin();
+    let (ana, fingerprint) = invited(&admin, "ana");
+    admin.ok(&[
+        "user",
+        "approve",
+        "ana",
+        "--fingerprint",
+        &fingerprint,
+        "--env",
+        "dev",
+    ]);
+    ana.ok(&["set", "dev", "API_TOKEN", "ana-local-s3cr3t"]);
+
+    let creator = fingerprint_of(&admin, "admin");
+    let err = ana.err(&["migrate", "--to", "remote"]);
+    assert!(err.contains("created by 'admin'"), "{err}");
+    assert!(err.contains(&creator), "{err}");
+    let err = ana.err(&["migrate", "--to", "remote", "--creator", "0000 1111"]);
+    assert!(err.contains("not the fingerprint"), "{err}");
+    assert!(!err.contains("ana-local-s3cr3t"), "{err}");
+    assert!(
+        !project_state(&admin).contains("ana-local"),
+        "nothing was sent"
+    );
+
+    ana.ok(&["migrate", "--to", "remote", "--creator", &creator]);
+    ana.ok(&["run", "dev", "--", "node"]);
+    assert_eq!(ana.runner.calls.borrow()[0].envs["API_TOKEN"], TOKEN);
+}
+
+#[test]
+fn creator_is_only_for_a_project_that_exists() {
+    let h = Harness::with_manifest();
+    let root = h.root_token.clone();
+    h.ok(&["login", SERVER, "--root-token", &root, "--name", "admin"]);
+    let err = h.err(&["migrate", "--to", "remote", "--creator", "0000"]);
+    assert!(err.contains("has no project"), "{err}");
+}
 
 #[test]
 fn an_approved_member_reads_only_the_environments_it_was_given() {
@@ -128,7 +193,7 @@ fn an_approved_member_reads_only_the_environments_it_was_given() {
         "--env",
         "dev",
     ]);
-    let out = ana.ok(&["migrate", "--to", "remote"]);
+    let out = join_project(&ana, "admin");
     assert!(out.contains("already has this project"), "{out}");
 
     ana.ok(&["run", "dev", "--", "node"]);
@@ -177,7 +242,7 @@ fn a_writer_shares_new_environments_with_the_readers() {
         "*",
         "--write",
     ]);
-    ana.ok(&["migrate", "--to", "remote"]);
+    join_project(&ana, "admin");
 
     // `global` has no key yet: ana creates it, and the admin can read it.
     ana.ok(&["set", "global", "APP_NAME", "shared"]);
@@ -197,7 +262,7 @@ fn removing_a_member_rekeys_what_it_could_read() {
         "--env",
         "dev",
     ]);
-    ana.ok(&["migrate", "--to", "remote"]);
+    join_project(&ana, "admin");
     let before = project_state(&admin);
 
     let out = admin.ok(&["user", "rm", "ana"]);
@@ -390,10 +455,7 @@ fn inject_eve(
     approver: &str,
     signed_by: &dot_envy::identity::Identity,
 ) {
-    use dot_envy::{
-        remote::protocol::{Access, grant_message},
-        server::StoredMember,
-    };
+    use dot_envy::server::StoredMember;
     let store = h.server.store();
     store
         .put_member(&StoredMember {
@@ -412,10 +474,57 @@ fn inject_eve(
         keys: MemberKeys::of(&eve.public()),
         approver: approver.into(),
         signature: String::new(),
+        version: 0,
     };
     let signature = signed_by.sign(&grant_message(PROJECT_ID, &access));
     access.signature = base64_of(&signature);
     store.set_access(PROJECT_ID, &access).unwrap();
+}
+
+#[test]
+fn a_grant_replaced_later_is_never_trusted_again() {
+    let (admin, _) = admin();
+    let (ana, fingerprint) = invited(&admin, "ana");
+    admin.ok(&[
+        "user",
+        "approve",
+        "ana",
+        "--fingerprint",
+        &fingerprint,
+        "--env",
+        "dev",
+        "--write",
+    ]);
+    join_project(&ana, "admin");
+    admin.ok(&["set", "dev", "DATABASE_URL", "postgres://u@new/db"]);
+    let store = admin.server.store();
+    let first = store
+        .access(PROJECT_ID)
+        .unwrap()
+        .into_iter()
+        .find(|a| a.member == "ana")
+        .unwrap();
+    assert!(first.version > 0, "new grants carry a version");
+
+    // The admin reduces ana to reading dev, and its machine sees the new grant.
+    let creator = dot_envy::identity::load(&admin.vault, SERVER, None)
+        .unwrap()
+        .unwrap();
+    let mut reduced = Access {
+        write: false,
+        version: first.version + 1,
+        ..first.clone()
+    };
+    reduced.signature = base64_of(&creator.sign(&grant_message(PROJECT_ID, &reduced)));
+    store.set_access(PROJECT_ID, &reduced).unwrap();
+    admin.ok(&["ls", "dev", "--show"]);
+
+    // The server puts the old write grant back and lets ana write with it.
+    store.set_access(PROJECT_ID, &first).unwrap();
+    ana.ok(&["set", "dev", "API_TOKEN", "ana-s3cr3t"]);
+    let err = admin.err(&["ls", "dev", "--show"]);
+    assert!(err.contains("Nothing was used"), "{err}");
+    assert!(!err.contains("ana-s3cr3t"), "{err}");
 }
 
 fn base64_of(bytes: &[u8]) -> String {
@@ -525,7 +634,7 @@ fn a_project_outlives_its_creator() {
         "*",
         "--write",
     ]);
-    bob.ok(&["migrate", "--to", "remote"]);
+    join_project(&bob, "admin");
 
     // The creator leaves; bob replaces the keys it could read.
     let out = bob.ok(&["user", "rm", "admin"]);
@@ -542,7 +651,7 @@ fn a_project_outlives_its_creator() {
         "--env",
         "dev",
     ]);
-    carol.ok(&["migrate", "--to", "remote"]);
+    join_project(&carol, "admin");
     carol.ok(&["run", "dev", "--", "node"]);
     assert_eq!(carol.runner.calls.borrow()[0].envs["API_TOKEN"], TOKEN);
 }
@@ -576,7 +685,7 @@ fn a_new_admin_and_the_recovery_key_rescue_a_project() {
         "*",
         "--write",
     ]);
-    dave.ok(&["migrate", "--to", "remote"]);
+    join_project(&dave, "admin");
     dave.prompter.answers(&[&words]);
     dave.ok(&["vault", "recover"]);
     dave.ok(&["run", "dev", "--", "node"]);

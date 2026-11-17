@@ -163,8 +163,9 @@ pub struct InitArgs {
 pub struct ImportArgs {
     /// Path to the .envy bundle
     pub path: PathBuf,
-    /// Key printed by `envy export`
-    pub key: String,
+    /// Key printed by `envy export`. Leave it out to type it without echo, so it stays out
+    /// of the shell history next to the file name
+    pub key: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -295,6 +296,10 @@ pub struct MigrateArgs {
     /// like a machine without a keyring)
     #[arg(long, conflicts_with = "remove_source")]
     pub fresh: bool,
+    /// With `--to remote`, for a project someone else created on the server: their
+    /// fingerprint, checked with them through another channel. The creator receives every key
+    #[arg(long, value_name = "FINGERPRINT")]
+    pub creator: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -403,6 +408,9 @@ pub struct ServeArgs {
     /// Print a new root token for an existing server (to add an admin) and exit
     #[arg(long, conflicts_with = "init")]
     pub new_root_token: bool,
+    /// Remove a project from the server and exit, freeing its id (its values are lost)
+    #[arg(long, value_name = "ID", conflicts_with_all = ["init", "new_root_token"])]
+    pub remove_project: Option<String>,
 }
 
 #[cfg(test)]
