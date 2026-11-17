@@ -432,9 +432,14 @@ impl Envy {
                  it would be committed to Git."
             );
         }
-        EnvironmentTypes::validate(default, kind).map_err(|err| {
-            anyhow::anyhow!("The default of '{key}' in '{env_name}' is not a valid {kind}: {err}")
-        })
+        // Defaults are committed and never secret, so the parser's own message may quote them.
+        EnvironmentTypes::parse_value(default, kind)
+            .map(|_| ())
+            .map_err(|err| {
+                anyhow::anyhow!(
+                    "The default of '{key}' in '{env_name}' is not a valid {kind}: {err}"
+                )
+            })
     }
 }
 

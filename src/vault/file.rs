@@ -757,7 +757,7 @@ fn create_private_dir(dir: &Path) -> Result<()> {
 
 /// Writes next to the vault and renames over it, so a crash leaves the old file or the new
 /// one, never half of one. On Unix only the user can read it.
-fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
     let temporary = path.with_extension(format!("json.tmp-{}", std::process::id()));
     let mut options = fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);

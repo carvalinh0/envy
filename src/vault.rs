@@ -24,6 +24,7 @@ mod file;
 pub mod format;
 
 pub use file::EncryptedFileVault;
+pub(crate) use file::write_atomically;
 
 use std::{collections::HashMap, sync::Mutex};
 

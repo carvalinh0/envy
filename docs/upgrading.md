@@ -9,6 +9,28 @@ manifests and `.envy-state` are never touched. `envy version` tells you when a n
 What each major release asks of you is below. See [compatibility](compatibility.md) for what older
 releases do with data written by newer ones.
 
+## After 4.0: security fixes
+
+**Command line:**
+
+- `envy migrate --to remote` on a project someone else created on the server stops and shows the
+  creator's name and fingerprint. Check it with them and run it again with `--creator <fingerprint>`.
+  This is needed once per machine and project.
+- `envy login --root-token` needs the URL on the command line; it no longer uses the manifest's
+  `server`.
+- `envy run` no longer passes `ENVY_IDENTITY`, `ENVY_VAULT_PASSWORD` and `ENVY_PROTECT_PASSWORD` to the
+  command. A script that calls `envy` again inside `envy run` must receive them another way.
+- Invalid values are reported without the parser's detail (which could quote the value).
+- `envy import <file>` without the key asks for it without echo.
+
+**Server:** the image no longer adds `--behind-proxy` by default. A container started without
+arguments now refuses to start; pass `--behind-proxy` (with a TLS proxy in front) or `--tls-cert` and
+`--tls-key`. The rate limit behind a proxy uses the last `X-Forwarded-For` address. An admin needs
+write access to an environment to remove its key wraps, and can't replace the recovery key's wraps.
+
+**Library (`dot-envy` crate):** `MigrateArgs` gained `creator`, `ImportArgs::key` is an
+`Option<String>`, and `RemoteVault` gained `unconfirmed_creator`.
+
 ## 4.0
 
 **Command line:** nothing to do. Projects keep the backend they had; the server is only used after

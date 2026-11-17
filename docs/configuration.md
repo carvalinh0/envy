@@ -14,6 +14,9 @@ Envy needs no configuration. These variables change its behaviour when you need 
 | `ENVY_NO_UPDATE_CHECK` | Any value: `envy version` does not look for a newer release. |
 
 Variables that hold secrets belong in your CI's secret store, never in a file of the repository.
+`envy run` does not pass `ENVY_IDENTITY`, `ENVY_VAULT_PASSWORD` or `ENVY_PROTECT_PASSWORD` on to the
+command it starts (unless the manifest declares a variable with that name): the command gets the values
+of one environment, not the keys to all of them.
 
 ## Files Envy writes
 

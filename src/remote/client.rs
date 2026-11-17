@@ -145,8 +145,12 @@ impl Pins {
                     fs::create_dir_all(dir)
                         .with_context(|| format!("Could not create {}", dir.display()))?;
                 }
-                fs::write(path, serde_json::to_string_pretty(&all)?)
-                    .with_context(|| format!("Could not write {}", path.display()))?;
+                // A half-written file would be "corrupted", and deleting it forgets every
+                // pinned key, which is what the pins defend against.
+                crate::vault::write_atomically(
+                    path,
+                    serde_json::to_string_pretty(&all)?.as_bytes(),
+                )?;
             }
             None => *self.memory.borrow_mut() = all,
         }
@@ -863,6 +867,32 @@ impl<'a> RemoteVault<'a> {
             Err(err) if is_status(&err, 404) => Ok(false),
             Err(err) => Err(err),
         }
+    }
+
+    /// The name and fingerprint of whoever created `project`, when this machine has not
+    /// pinned it yet and it is not this member. The creator receives every key written to
+    /// the project, and any member can create a project under an id it read in a manifest,
+    /// so joining one is only safe once that fingerprint was checked with the creator.
+    pub fn unconfirmed_creator(&self, project: &str) -> Result<Option<(String, String)>> {
+        let session = self.session_for(project)?;
+        let pinned = self
+            .pins
+            .update(&session.url, |pins| Ok(pins.creators.contains_key(project)))?;
+        if pinned {
+            return Ok(None);
+        }
+        let view: ProjectView = session.call(&Request::ProjectGet {
+            project: project.to_string(),
+        })?;
+        let keys = view
+            .creator
+            .keys
+            .decode()
+            .ok_or_else(|| anyhow!("The server does not show who created '{project}'."))?;
+        if view.creator.member == session.identity.name && keys == session.identity.public() {
+            return Ok(None);
+        }
+        Ok(Some((view.creator.member, keys.fingerprint())))
     }
 
     /// Creates `project` on the server with a new name key, wrapped for the caller and for

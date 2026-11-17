@@ -162,7 +162,7 @@ back to another backend and nothing is cached on disk.
 `envy serve [--data DIR] [--listen ADDR] [--tls-cert FILE --tls-key FILE] [--behind-proxy]
 [--session-ttl HOURS] [--init [--init-output FILE]] [--new-root-token]`. Authentication
 failures (`session`, `join`, `bootstrap`) are limited to 10 per client address per 10 minutes
-(`429`); behind a proxy the address comes from `X-Forwarded-For`. Requests over 4 MiB are
+(`429`); behind a proxy the address is the last one of `X-Forwarded-For`, the one the proxy added. Requests over 4 MiB are
 refused. The image is `FROM scratch` with a static musl binary, user 65532, a read-only root
 file system and one volume, `/data`.
 

@@ -58,11 +58,13 @@ envy login https://envy.example.com --invite <code> --name ana   # prints her fi
 # admin, after Ana sent the fingerprint through another channel
 envy user approve ana --fingerprint <fingerprint> --env dev --env staging
 
-# Ana
-envy migrate --to remote                   # her local copies never overwrite the server's values
+# Ana, with the admin's fingerprint (`envy user list` on the admin's machine), checked with the admin
+envy migrate --to remote --creator <fingerprint>   # her local copies never overwrite the server's values
 ```
 
-Approval fails if the fingerprint is not the key the server holds. Access is per project and
+Approval fails if the fingerprint is not the key the server holds. Joining asks for the fingerprint of
+whoever created the project, because the creator receives every key: any member could create a
+project under an id read from a manifest and wait for others to send their values to it. Access is per project and
 environment, read-only unless `--write`; `--env '*'` gives every environment. A member without access
 to `prod` never receives its values.
 

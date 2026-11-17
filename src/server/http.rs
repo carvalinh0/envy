@@ -163,16 +163,19 @@ async fn health() -> &'static str {
     "ok"
 }
 
-/// Behind a proxy the peer is the proxy, so the client is the first `X-Forwarded-For`
-/// address. Without `--behind-proxy` that header is ignored: anyone could forge it.
-fn client_address(app: &App, peer: SocketAddr, headers: &HeaderMap) -> String {
+/// Behind a proxy the peer is the proxy, so the client is the last `X-Forwarded-For`
+/// address: the one the proxy added. The earlier ones come from the client, which could
+/// send a new one with every attempt and never be rate limited (nginx and Traefik append to
+/// the header they receive). Without `--behind-proxy` the header is ignored: anyone could
+/// forge it.
+fn forwarded_client(behind_proxy: bool, peer: SocketAddr, headers: &HeaderMap) -> String {
     let forwarded = headers
         .get("x-forwarded-for")
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
+        .and_then(|value| value.rsplit(',').next())
         .and_then(|value| value.trim().parse::<IpAddr>().ok());
     match forwarded {
-        Some(ip) if app.behind_proxy => ip.to_string(),
+        Some(ip) if behind_proxy => ip.to_string(),
         _ => peer.ip().to_string(),
     }
 }
@@ -183,7 +186,7 @@ async fn rpc(
     headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
-    let client = client_address(&app, peer, &headers);
+    let client = forwarded_client(app.behind_proxy, peer, &headers);
     let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
@@ -198,4 +201,26 @@ async fn rpc(
         [(header::CONTENT_TYPE, "application/json")],
         reply,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn behind_a_proxy_the_client_is_the_address_the_proxy_added() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-forwarded-for",
+            "6.6.6.6, 7.7.7.7, 203.0.113.9".parse().unwrap(),
+        );
+        let peer: SocketAddr = "10.0.0.2:4000".parse().unwrap();
+        assert_eq!(forwarded_client(true, peer, &headers), "203.0.113.9");
+        assert_eq!(
+            forwarded_client(false, peer, &headers),
+            "10.0.0.2",
+            "without --behind-proxy the header is ignored"
+        );
+        assert_eq!(forwarded_client(true, peer, &HeaderMap::new()), "10.0.0.2");
+    }
 }

@@ -34,6 +34,8 @@ const ROOT_TOKEN: &str = "root_token";
 const MAX_FAILURES: usize = 10;
 const FAILURE_WINDOW: i64 = 600;
 const CHALLENGE_TTL: i64 = 120;
+/// Challenges waiting for their signature. Anyone can ask for one, so they are capped.
+const MAX_CHALLENGES: usize = 10_000;
 const INVITE_TTL: i64 = 24 * 3600;
 
 fn hash(text: &str) -> String {
@@ -140,6 +142,8 @@ pub struct ServerCore {
     store: Box<dyn ServerStore>,
     clock: Box<dyn Clock + Send + Sync>,
     session_ttl: Duration,
+    /// `nonce -> (member name, expiry)`. Keyed by the nonce, so asking for a challenge never
+    /// cancels one already handed to someone else for the same name.
     challenges: Mutex<HashMap<String, (String, i64)>>,
     failures: Mutex<HashMap<String, Vec<i64>>>,
 }
@@ -268,9 +272,14 @@ impl ServerCore {
         let now = self.now();
         {
             let mut failures = self.failures.lock().expect("failures lock");
-            let recent = failures.entry(client.to_string()).or_default();
-            recent.retain(|at| now - at < FAILURE_WINDOW);
-            if recent.len() >= MAX_FAILURES {
+            failures.retain(|_, recent| {
+                recent.retain(|at| now - at < FAILURE_WINDOW);
+                !recent.is_empty()
+            });
+            if failures
+                .get(client)
+                .is_some_and(|recent| recent.len() >= MAX_FAILURES)
+            {
                 return Err(ApiError::new(
                     429,
                     "too_many_attempts",
@@ -364,11 +373,21 @@ impl ServerCore {
     }
 
     fn challenge(&self, name: &str) -> Reply {
+        if !valid_name(name) {
+            return Err(bad_request("That is not a member name."));
+        }
+        let now = self.now();
+        let mut challenges = self.challenges.lock().expect("challenges lock");
+        challenges.retain(|_, (_, expires)| *expires > now);
+        if challenges.len() >= MAX_CHALLENGES {
+            return Err(ApiError::new(
+                429,
+                "too_many_attempts",
+                "The server is busy; try again in a few minutes.",
+            ));
+        }
         let nonce = random_token();
-        self.challenges.lock().expect("challenges lock").insert(
-            name.to_string(),
-            (nonce.clone(), self.now() + CHALLENGE_TTL),
-        );
+        challenges.insert(nonce.clone(), (name.to_string(), now + CHALLENGE_TTL));
         reply(Nonce { nonce })
     }
 
@@ -378,9 +397,9 @@ impl ServerCore {
             .challenges
             .lock()
             .expect("challenges lock")
-            .remove(name);
+            .remove(nonce);
         let fresh =
-            issued.is_some_and(|(expected, expires)| expected == nonce && expires > self.now());
+            issued.is_some_and(|(asked_for, expires)| asked_for == name && expires > self.now());
         let member = stored(self.store.member(name))?;
         let (Some(member), true) = (member, fresh) else {
             return Err(failed());
@@ -584,9 +603,10 @@ impl ServerCore {
                 Purpose::Names => has_access(access, &caller.name),
             };
             // A reader may wrap keys for itself (recovery); giving a key to anyone else, or
-            // replacing someone else's wrap, takes write access to it or being an admin.
+            // replacing someone else's wrap, takes write access to it or being an admin. The
+            // recovery wrap is never an admin's to replace: a bad one loses the project.
             let shares = wrap.member != caller.name
-                && !caller.admin
+                && (!caller.admin || wrap.member == RECOVERY)
                 && !match wrap.purpose {
                     Purpose::Dek => can_write(access, &caller.name, &wrap.env),
                     Purpose::Names => writes_anything(access, &caller.name),
@@ -792,7 +812,8 @@ impl ServerCore {
             }
         }
         self.check_wraps(caller, keys, &commit.project, access, &commit.add_wraps)?;
-        let manages = |env: &str| caller.admin || can_write(access, &caller.name, env);
+        // Removing a wrap can lose a key for good, so it takes write access, even for an admin.
+        let manages = |env: &str| can_write(access, &caller.name, env);
         let removes_ok = commit.remove_wraps.iter().all(|w| match w.purpose {
             Purpose::Dek => manages(&w.env),
             Purpose::Names => manages(ALL_ENVIRONMENTS),
@@ -947,12 +968,16 @@ mod tests {
 
         /// An active member without access to anything.
         fn member(&self, admin_token: &str, name: &str) -> (Identity, String) {
+            self.member_as(admin_token, name, false)
+        }
+
+        fn member_as(&self, admin_token: &str, name: &str, admin: bool) -> (Identity, String) {
             let invite: Invite = serde_json::from_value(
                 self.call(
                     Some(admin_token),
                     Request::MemberAdd {
                         name: name.into(),
-                        admin: false,
+                        admin,
                     },
                 )
                 .unwrap(),
@@ -1150,6 +1175,111 @@ mod tests {
     }
 
     #[test]
+    fn asking_for_a_challenge_does_not_cancel_someone_elses() {
+        let f = fixture();
+        let (admin, _) = f.admin();
+        let nonce: Nonce = serde_json::from_value(
+            f.call(
+                None,
+                Request::Challenge {
+                    name: "admin".into(),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        for _ in 0..MAX_FAILURES + 1 {
+            let _ = f.core.handle(
+                "10.6.6.6",
+                None,
+                Request::Challenge {
+                    name: "admin".into(),
+                },
+            );
+        }
+        let server_id = f.core.store().meta(SERVER_ID).unwrap().unwrap();
+        let signature = b64(&admin.sign(&session_message(&server_id, "admin", &nonce.nonce)));
+        assert!(
+            f.call(
+                None,
+                Request::Session {
+                    name: "admin".into(),
+                    nonce: nonce.nonce,
+                    signature,
+                },
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_challenge_is_only_good_for_the_name_it_was_asked_for() {
+        let f = fixture();
+        let (admin, token) = f.admin();
+        f.member(&token, "ana");
+        let nonce: Nonce = serde_json::from_value(
+            f.call(None, Request::Challenge { name: "ana".into() })
+                .unwrap(),
+        )
+        .unwrap();
+        let server_id = f.core.store().meta(SERVER_ID).unwrap().unwrap();
+        let signature = b64(&admin.sign(&session_message(&server_id, "admin", &nonce.nonce)));
+        let reply = f.call(
+            None,
+            Request::Session {
+                name: "admin".into(),
+                nonce: nonce.nonce,
+                signature,
+            },
+        );
+        assert_eq!(status(reply), 401);
+    }
+
+    #[test]
+    fn challenges_are_bounded() {
+        let f = fixture();
+        assert_eq!(
+            status(f.call(
+                None,
+                Request::Challenge {
+                    name: "x".repeat(1000)
+                }
+            )),
+            400,
+            "not a member name"
+        );
+        for i in 0..MAX_CHALLENGES {
+            f.call(
+                None,
+                Request::Challenge {
+                    name: format!("m{i}"),
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            status(f.call(
+                None,
+                Request::Challenge {
+                    name: "late".into()
+                }
+            )),
+            429
+        );
+        f.advance(Duration::seconds(CHALLENGE_TTL + 1));
+        assert!(
+            f.call(
+                None,
+                Request::Challenge {
+                    name: "late".into()
+                }
+            )
+            .is_ok(),
+            "expired challenges make room"
+        );
+    }
+
+    #[test]
     fn commits_need_the_current_head_write_access_and_the_writer_signature() {
         let f = fixture();
         let (admin, token) = f.admin();
@@ -1279,6 +1409,68 @@ mod tests {
         assert_eq!(status(f.call(Some(&ana_token), with_wrap("admin"))), 403);
         assert_eq!(status(f.call(Some(&ana_token), with_wrap(RECOVERY))), 403);
         assert!(f.call(Some(&ana_token), with_wrap("ana")).is_ok());
+    }
+
+    #[test]
+    fn an_admin_cannot_strip_the_keys_of_environments_it_does_not_write() {
+        let f = fixture();
+        let (admin, token) = f.admin();
+        create(&f, &admin, &token);
+        let mut first = commit(&admin, 1, vec![record(&admin, &admin, "p", 1)]);
+        if let Request::Commit(commit) = &mut first {
+            commit.add_wraps = vec![wrap(&admin, "p", "admin"), wrap(&admin, "p", RECOVERY)];
+        }
+        f.call(Some(&token), first).unwrap();
+
+        let (bob, bob_token) = f.member_as(&token, "bob", true);
+        let strip = |member: &str| {
+            Request::Commit(Box::new(Commit {
+                project: "p".into(),
+                expected_seq: 2,
+                head: head(
+                    &bob,
+                    "p",
+                    3,
+                    vec![HeadEntry {
+                        env: "dev".into(),
+                        key: "tag".into(),
+                        version: 1,
+                    }],
+                ),
+                remove_wraps: vec![wrap(&admin, "p", member).reference()],
+                ..Commit::default()
+            }))
+        };
+        assert_eq!(status(f.call(Some(&bob_token), strip("admin"))), 403);
+        assert_eq!(status(f.call(Some(&bob_token), strip(RECOVERY))), 403);
+
+        // A reading admin still gives keys to members (`envy user approve`), but can't
+        // replace the recovery wrap, which the whole project depends on.
+        let grant = Request::Grant {
+            project: "p".into(),
+            access: signed_grant(&admin, &bob, "dev", false),
+        };
+        f.call(Some(&token), grant).unwrap();
+        let replace = |member: &str| {
+            Request::Commit(Box::new(Commit {
+                project: "p".into(),
+                expected_seq: 2,
+                head: head(
+                    &bob,
+                    "p",
+                    3,
+                    vec![HeadEntry {
+                        env: "dev".into(),
+                        key: "tag".into(),
+                        version: 1,
+                    }],
+                ),
+                add_wraps: vec![wrap(&bob, "p", member)],
+                ..Commit::default()
+            }))
+        };
+        assert_eq!(status(f.call(Some(&bob_token), replace(RECOVERY))), 403);
+        assert!(f.call(Some(&bob_token), replace("bob")).is_ok());
     }
 
     #[test]

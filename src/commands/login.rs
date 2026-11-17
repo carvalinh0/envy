@@ -16,6 +16,13 @@ use crate::{
 /// with a new identity. The backend only changes with `envy migrate --to remote`.
 pub fn run(ctx: &Context, args: &LoginArgs, out: &mut dyn Write) -> Result<()> {
     let envy = ctx.load_envy()?;
+    // The manifest comes from Git, where anyone who can push could point `server` at their
+    // own host: a root token, which makes an admin, only goes to a URL typed by the operator.
+    if args.root_token.is_some() && args.url.is_none() {
+        bail!(
+            "Give the server URL with a root token: `envy login <url> --root-token <token> --name <name>`."
+        );
+    }
     let url = args.url.clone().or(envy.server.clone()).ok_or_else(|| {
         anyhow!("Give the server URL (`envy login https://...`) or add \"server\" to the manifest.")
     })?;

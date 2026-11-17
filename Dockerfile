@@ -30,4 +30,7 @@ USER 65532:65532
 VOLUME /data
 EXPOSE 8443
 ENTRYPOINT ["/envy", "serve", "--data", "/data"]
-CMD ["--listen", "0.0.0.0:8443", "--behind-proxy"]
+# No --behind-proxy by default: without TLS the server then refuses to start, instead of
+# serving plain http on every interface and trusting X-Forwarded-For from anyone who reaches
+# the port. Pass --tls-cert/--tls-key, or --behind-proxy when a TLS proxy is in front.
+CMD ["--listen", "0.0.0.0:8443"]

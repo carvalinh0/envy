@@ -120,6 +120,20 @@ fn import_restores_the_values_on_another_machine() {
 }
 
 #[test]
+fn import_asks_for_the_key_when_it_is_not_given() {
+    let h = populated();
+    let key = key_from(&h.ok(&["export", "dev"]));
+    let other = teammate();
+    std::fs::copy(h.path("Sample.dev.envy"), other.path("Sample.dev.envy")).unwrap();
+    other.prompter.answers(&[&key]);
+    other.ok(&["import", "Sample.dev.envy"]);
+    assert_eq!(
+        other.stored(PROJECT_ID, "dev", "API_TOKEN").as_deref(),
+        Some(SECRET_VALUE)
+    );
+}
+
+#[test]
 fn import_accepts_an_absolute_path() {
     let h = populated();
     let key = key_from(&h.ok(&["export", "dev"]));

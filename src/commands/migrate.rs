@@ -30,7 +30,7 @@ pub fn run(ctx: &Context, args: &MigrateArgs, out: &mut dyn Write) -> Result<()>
         readable_slots(source, &envy)?
     };
     let keep_existing = match to {
-        Backend::Remote => prepare_remote(ctx, &envy, out)?,
+        Backend::Remote => prepare_remote(ctx, &envy, args.creator.as_deref(), out)?,
         Backend::File if !ctx.backends.file.exists(&envy.id) => {
             create_file_vault(ctx, &envy, out)?;
             false
@@ -97,21 +97,52 @@ pub fn run(ctx: &Context, args: &MigrateArgs, out: &mut dyn Write) -> Result<()>
 /// Creates the project on its server, or reports that it exists already. Returns whether it
 /// existed: then only the values the server does not have are sent, so a teammate's newer
 /// values are never overwritten by an old local copy.
-fn prepare_remote(ctx: &Context, envy: &Envy, out: &mut dyn Write) -> Result<bool> {
+fn prepare_remote(
+    ctx: &Context,
+    envy: &Envy,
+    creator: Option<&str>,
+    out: &mut dyn Write,
+) -> Result<bool> {
     let remote = ctx.backends.remote;
     let url = remote.url(&envy.id)?;
     if remote.project_exists(&envy.id)? {
+        check_creator(ctx, envy, creator)?;
         writeln!(
             out,
             "{url} already has this project: only the values it does not have are copied."
         )?;
         return Ok(true);
     }
+    if creator.is_some() {
+        bail!(
+            "{url} has no project '{}' to join. Run without --creator to create it.",
+            envy.name
+        );
+    }
     writeln!(out, "Creating '{}' on {url}.", envy.name)?;
     let recovery = new_recovery_key(ctx, out)?;
     remote.create_project(&envy.id, &recovery)?;
     ctx.record(envy, "remote-create", None, vec![url])?;
     Ok(false)
+}
+
+/// Refuses a project created by someone this machine does not know yet unless `expected` is
+/// their fingerprint: whoever created it receives every key this machine will write.
+fn check_creator(ctx: &Context, envy: &Envy, expected: Option<&str>) -> Result<()> {
+    let Some((name, fingerprint)) = ctx.backends.remote.unconfirmed_creator(&envy.id)? else {
+        return Ok(());
+    };
+    match expected {
+        Some(expected) if expected.trim() == fingerprint => Ok(()),
+        Some(_) => bail!(
+            "That is not the fingerprint of '{name}', who created '{}' on the server. Nothing was sent.",
+            envy.name
+        ),
+        None => bail!(
+            "'{}' on the server was created by '{name}' (fingerprint {fingerprint}), who receives every key of it. Check that fingerprint with {name} through another channel, then run `envy migrate --to remote --creator <fingerprint>`.",
+            envy.name
+        ),
+    }
 }
 
 fn create_file_vault(ctx: &Context, envy: &Envy, out: &mut dyn Write) -> Result<()> {

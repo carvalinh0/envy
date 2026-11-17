@@ -6,7 +6,9 @@ application's container** to start it with its values.
 ## Running the server
 
 The image `ghcr.io/carvalinh0/envy` runs `envy serve --data /data`; the arguments you pass are added
-to that. It runs as user 65532 and works with a read-only root file system.
+to that. Without arguments it listens on `0.0.0.0:8443` and refuses to start until you give it
+`--tls-cert`/`--tls-key` or `--behind-proxy`. It runs as user 65532 and works with a read-only root
+file system.
 
 ### Behind Caddy (recommended)
 
