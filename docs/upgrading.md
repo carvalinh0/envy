@@ -9,6 +9,17 @@ manifests and `.envy-state` are never touched. `envy version` tells you when a n
 What each major release asks of you is below. See [compatibility](compatibility.md) for what older
 releases do with data written by newer ones.
 
+## 4.0
+
+**Command line:** nothing to do. Projects keep the backend they had; the server is only used after
+`envy login` and `envy migrate --to remote`. `envy.json` may gain an optional `server` key, which
+older releases drop when they rewrite the manifest (harmless: it is only a hint). If a project moves
+to a server, update every machine that uses it to 4.0.
+
+**Library (`dot-envy` crate):** `Backends` gained `remote` and `identities`, `Config` gained
+`server_url` and `identity`, `Commands::Audit` takes `AuditArgs`, `MigrateArgs` gained `fresh`, and
+the OS keyring is the default cargo feature `keyring` (`KeyringVault` needs it).
+
 ## 3.0
 
 **Command line:** nothing to do. Every command, flag, manifest, keyring entry and bundle of 2.x keeps
