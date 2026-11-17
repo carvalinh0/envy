@@ -51,7 +51,7 @@ removed; a plain `.env` has no environment name and is skipped. Edit the result 
 | `server` | Optional. URL of the team's Envy server, used by `envy login` without a URL. It never decides where anyone's values are stored. | Yes, then `envy up`. |
 | `schemas` | The environments and their variables. | Yes, or with the commands. |
 | `schemas.global` | Variables every environment shares; an environment can redeclare them. | Yes. |
-| `schemas.<env>.<VAR>` | `{ "type": ..., "default": ..., "rotate": ... }`. | Yes. |
+| `schemas.<env>.<VAR>` | `{ "type": ..., "default": ..., "rotate": ... }`. | Yes. Names may contain `/`, but not so that two variables share a keyring entry (`a/b` + `C` and `a` + `b/C` are both `a/b/C`): the manifest is refused until one is renamed. |
 
 The optional keys are only hashed when they are present, so a manifest that does not use them keeps
 the checksum it had with older releases. An older Envy that rewrites the manifest drops the keys it
