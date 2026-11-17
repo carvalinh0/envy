@@ -21,24 +21,29 @@ pub fn run(ctx: &Context, args: &MigrateArgs, out: &mut dyn Write) -> Result<()>
     if from == to {
         bail!("This project already uses the {} backend.", to.name());
     }
-    if to == Backend::Remote {
-        bail!("The remote backend is not available in this version of Envy.");
-    }
-    if to == Backend::File && !ctx.backends.file.exists(&envy.id) {
-        create_file_vault(ctx, &envy, out)?;
-    }
+    let keep_existing = match to {
+        Backend::Remote => prepare_remote(ctx, &envy, out)?,
+        Backend::File if !ctx.backends.file.exists(&envy.id) => {
+            create_file_vault(ctx, &envy, out)?;
+            false
+        }
+        _ => false,
+    };
 
     let (source, target) = (ctx.backends.vault(from), ctx.backends.vault(to));
     let now = ctx.clock.now();
     let mut copied = Vec::new();
+    let mut kept = Vec::new();
     for (environment, key) in slots(&envy)? {
         let moved = Move {
             project: &envy.id,
             environment: &environment,
             key: &key,
         };
-        if moved.copy(source, target, envy.history_keep(), now)? {
-            copied.push((environment, key));
+        match moved.copy(source, target, envy.history_keep(), now, keep_existing)? {
+            Outcome::Copied => copied.push((environment, key)),
+            Outcome::Kept => kept.push(format!("{environment}/{key}")),
+            Outcome::Empty => {}
         }
     }
 
@@ -64,6 +69,13 @@ pub fn run(ctx: &Context, args: &MigrateArgs, out: &mut dyn Write) -> Result<()>
         to.name(),
         to.name()
     )?;
+    if !kept.is_empty() {
+        writeln!(
+            out,
+            "Kept the server's values of {} (this machine's copies were not sent).",
+            kept.join(", ")
+        )?;
+    }
     if !args.remove_source {
         writeln!(
             out,
@@ -72,6 +84,26 @@ pub fn run(ctx: &Context, args: &MigrateArgs, out: &mut dyn Write) -> Result<()>
         )?;
     }
     Ok(())
+}
+
+/// Creates the project on its server, or reports that it exists already. Returns whether it
+/// existed: then only the values the server does not have are sent, so a teammate's newer
+/// values are never overwritten by an old local copy.
+fn prepare_remote(ctx: &Context, envy: &Envy, out: &mut dyn Write) -> Result<bool> {
+    let remote = ctx.backends.remote;
+    let url = remote.url(&envy.id)?;
+    if remote.project_exists(&envy.id)? {
+        writeln!(
+            out,
+            "{url} already has this project: only the values it does not have are copied."
+        )?;
+        return Ok(true);
+    }
+    writeln!(out, "Creating '{}' on {url}.", envy.name)?;
+    let recovery = new_recovery_key(ctx, out)?;
+    remote.create_project(&envy.id, &recovery)?;
+    ctx.record(envy, "remote-create", None, vec![url])?;
+    Ok(false)
 }
 
 fn create_file_vault(ctx: &Context, envy: &Envy, out: &mut dyn Write) -> Result<()> {
@@ -95,6 +127,14 @@ fn slots(envy: &Envy) -> Result<Vec<(String, String)>> {
     Ok(slots)
 }
 
+enum Outcome {
+    Copied,
+    /// The target already had a value and keeps it.
+    Kept,
+    /// Nothing to copy.
+    Empty,
+}
+
 struct Move<'a> {
     project: &'a str,
     environment: &'a str,
@@ -102,20 +142,24 @@ struct Move<'a> {
 }
 
 impl Move<'_> {
-    /// Replays the versions oldest first, so the active value ends up active. Returns
-    /// `false` when there is no active value: versions left behind by a deleted value are
-    /// not moved.
+    /// Replays the versions oldest first, so the active value ends up active. A variable
+    /// with no active value is not moved (versions left behind by a deleted value stay), and
+    /// with `keep_existing` neither is one the target already has.
     fn copy(
         &self,
         source: &dyn SecretVault,
         target: &dyn SecretVault,
         keep: usize,
         now: DateTime<Utc>,
-    ) -> Result<bool> {
+        keep_existing: bool,
+    ) -> Result<Outcome> {
         let (project, environment, key) = (self.project, self.environment, self.key);
         let history = source.history(project, environment, key)?;
         if !history.iter().any(|version| version.active) {
-            return Ok(false);
+            return Ok(Outcome::Empty);
+        }
+        if keep_existing && target.get(project, environment, key)?.is_some() {
+            return Ok(Outcome::Kept);
         }
         for version in history.iter().rev() {
             let Some(value) = source.get_version(project, environment, key, version.number)? else {
@@ -137,6 +181,6 @@ impl Move<'_> {
                 "'{key}' in '{environment}' did not arrive intact; the project still uses its current backend."
             );
         }
-        Ok(true)
+        Ok(Outcome::Copied)
     }
 }

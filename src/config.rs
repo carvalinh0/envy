@@ -39,6 +39,10 @@ pub struct Config {
     pub data_dir: Option<PathBuf>,
     /// Password of the file vault, for non-interactive runs (`ENVY_VAULT_PASSWORD`).
     pub vault_password: Option<Secret>,
+    /// Server of projects with no `envy login` on this machine (`ENVY_SERVER`, for CI).
+    pub server_url: Option<String>,
+    /// Member identity for the server, instead of the keyring (`ENVY_IDENTITY`, for CI).
+    pub identity: Option<Secret>,
     /// Password of protected environments, for non-interactive runs (`ENVY_PROTECT_PASSWORD`).
     pub protect_password: Option<Secret>,
 }
@@ -55,6 +59,8 @@ impl Config {
             user: UNKNOWN_USER.to_string(),
             data_dir: None,
             vault_password: None,
+            server_url: None,
+            identity: None,
             protect_password: None,
         }
     }
@@ -92,6 +98,8 @@ impl Config {
             .unwrap_or_else(|| UNKNOWN_USER.to_string());
         config.data_dir = data_dir(var);
         config.vault_password = var("ENVY_VAULT_PASSWORD").map(Secret::new);
+        config.server_url = var("ENVY_SERVER");
+        config.identity = var("ENVY_IDENTITY").map(Secret::new);
         config.protect_password = var("ENVY_PROTECT_PASSWORD").map(Secret::new);
         Ok(config)
     }

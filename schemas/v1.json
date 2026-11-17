@@ -66,6 +66,12 @@
       "uniqueItems": true,
       "items": { "type": "string", "minLength": 1 }
     },
+    "server": {
+      "type": "string",
+      "format": "uri",
+      "title": "URL of the team's Envy server",
+      "description": "Only a hint for `envy login` without a URL. Each user chooses where their values are stored."
+    },
     "schemas": {
       "type": "object",
       "title": "Your environments configuration",

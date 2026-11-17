@@ -12,7 +12,7 @@ pub struct Cli {
     #[arg(short = 'C', value_name = "DIR", global = true)]
     pub directory: Option<PathBuf>,
 
-    /// Where the values are stored (default: keyring, or ENVY_BACKEND)
+    /// Store values here for every project, whatever `envy migrate` chose (also ENVY_BACKEND)
     #[arg(long, value_enum, global = true)]
     pub backend: Option<Backend>,
 
@@ -20,7 +20,7 @@ pub struct Cli {
     pub command: Commands,
 }
 
-/// Storage of the values. The remote backend is reserved for the Envy server.
+/// Where the values of a project are stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Backend {
@@ -28,7 +28,7 @@ pub enum Backend {
     Keyring,
     /// An encrypted file in your data folder
     File,
-    /// An Envy server (not available yet)
+    /// An Envy server (see `envy login`)
     Remote,
 }
 
@@ -119,7 +119,7 @@ pub enum Commands {
     Rollback(RollbackArgs),
 
     /// Show this project's local audit log and verify that it was not modified
-    Audit,
+    Audit(AuditArgs),
 
     /// Require a password for an environment and encrypt the values stored for it
     Protect(ProtectArgs),
@@ -130,8 +130,17 @@ pub enum Commands {
     /// Move this project's values and their history to another backend
     Migrate(MigrateArgs),
 
-    /// Manage the encrypted file vault of this project
+    /// Manage the keys of this project on the file vault or the Envy server
     Vault(VaultArgs),
+
+    /// Use an Envy server for this project: join it with an invite, or reconnect
+    Login(LoginArgs),
+
+    /// Stop using the Envy server for this project on this machine (the server keeps the values)
+    Logout,
+
+    /// Manage the members of the Envy server
+    User(UserArgs),
 
     /// Run an Envy server (Linux builds with the `server` feature, or the Docker image)
     Serve(ServeArgs),
@@ -296,10 +305,69 @@ pub enum VaultAction {
     Password,
     /// Encrypt an environment again with a new key
     Rekey { environment: String },
-    /// Set a new password with the recovery key
+    /// Regain the keys with the recovery key (and set a new password for a file vault)
     Recover,
     /// Replace the recovery key (the old one stops working)
     RecoveryKey,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditArgs {
+    /// Show the log of the Envy server instead (admins only)
+    #[arg(long)]
+    pub server: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct LoginArgs {
+    /// Server URL (https://, or http:// for localhost). Defaults to "server" in the manifest.
+    pub url: Option<String>,
+    /// Join the server with the invite an admin created (`envy user add`)
+    #[arg(long, conflicts_with = "root_token", requires = "name")]
+    pub invite: Option<String>,
+    /// Become the first admin with the root token printed by `envy serve --init`
+    #[arg(long, requires = "name")]
+    pub root_token: Option<String>,
+    /// Member name to join with
+    #[arg(long)]
+    pub name: Option<String>,
+    /// Print the new identity once instead of storing it in the keyring (for CI secrets)
+    #[arg(long)]
+    pub print_identity: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct UserArgs {
+    #[command(subcommand)]
+    pub action: UserAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum UserAction {
+    /// Invite a new member; prints a one-time invite
+    Add {
+        name: String,
+        /// Let the member manage other members
+        #[arg(long)]
+        admin: bool,
+    },
+    /// Activate a member that joined, after comparing its fingerprint out of band
+    Approve {
+        name: String,
+        /// The fingerprint the member saw when it joined
+        #[arg(long)]
+        fingerprint: String,
+        /// Environment of this project it may use (repeat it); `*` means every one
+        #[arg(long = "env", required = true)]
+        environments: Vec<String>,
+        /// Let it change values, not only read them
+        #[arg(long)]
+        write: bool,
+    },
+    /// Remove a member and replace the keys it could read
+    Rm { name: String },
+    /// List the members and their fingerprints
+    List,
 }
 
 #[derive(Debug, Args)]
