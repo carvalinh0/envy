@@ -304,6 +304,7 @@ impl ServerCore {
         reply(ServerInfo {
             server_id: self.server_id()?,
             version: env!("CARGO_PKG_VERSION").into(),
+            versioned_grants: true,
         })
     }
 
@@ -1042,6 +1043,7 @@ mod tests {
             keys: MemberKeys::of(&member.public()),
             approver: approver.name.clone(),
             signature: String::new(),
+            version: 1,
         };
         access.signature = b64(&approver.sign(&grant_message("p", &access)));
         access

@@ -2,7 +2,7 @@ mod common;
 
 use common::{Harness, PROJECT_ID, SERVER, recovery_words};
 use dot_envy::{
-    remote::protocol::{MemberKeys, MemberStatus},
+    remote::protocol::{Access, MemberKeys, MemberStatus, grant_message},
     schema::Secret,
 };
 
@@ -455,10 +455,7 @@ fn inject_eve(
     approver: &str,
     signed_by: &dot_envy::identity::Identity,
 ) {
-    use dot_envy::{
-        remote::protocol::{Access, grant_message},
-        server::StoredMember,
-    };
+    use dot_envy::server::StoredMember;
     let store = h.server.store();
     store
         .put_member(&StoredMember {
@@ -477,10 +474,57 @@ fn inject_eve(
         keys: MemberKeys::of(&eve.public()),
         approver: approver.into(),
         signature: String::new(),
+        version: 0,
     };
     let signature = signed_by.sign(&grant_message(PROJECT_ID, &access));
     access.signature = base64_of(&signature);
     store.set_access(PROJECT_ID, &access).unwrap();
+}
+
+#[test]
+fn a_grant_replaced_later_is_never_trusted_again() {
+    let (admin, _) = admin();
+    let (ana, fingerprint) = invited(&admin, "ana");
+    admin.ok(&[
+        "user",
+        "approve",
+        "ana",
+        "--fingerprint",
+        &fingerprint,
+        "--env",
+        "dev",
+        "--write",
+    ]);
+    join_project(&ana, "admin");
+    admin.ok(&["set", "dev", "DATABASE_URL", "postgres://u@new/db"]);
+    let store = admin.server.store();
+    let first = store
+        .access(PROJECT_ID)
+        .unwrap()
+        .into_iter()
+        .find(|a| a.member == "ana")
+        .unwrap();
+    assert!(first.version > 0, "new grants carry a version");
+
+    // The admin reduces ana to reading dev, and its machine sees the new grant.
+    let creator = dot_envy::identity::load(&admin.vault, SERVER, None)
+        .unwrap()
+        .unwrap();
+    let mut reduced = Access {
+        write: false,
+        version: first.version + 1,
+        ..first.clone()
+    };
+    reduced.signature = base64_of(&creator.sign(&grant_message(PROJECT_ID, &reduced)));
+    store.set_access(PROJECT_ID, &reduced).unwrap();
+    admin.ok(&["ls", "dev", "--show"]);
+
+    // The server puts the old write grant back and lets ana write with it.
+    store.set_access(PROJECT_ID, &first).unwrap();
+    ana.ok(&["set", "dev", "API_TOKEN", "ana-s3cr3t"]);
+    let err = admin.err(&["ls", "dev", "--show"]);
+    assert!(err.contains("Nothing was used"), "{err}");
+    assert!(!err.contains("ana-s3cr3t"), "{err}");
 }
 
 fn base64_of(bytes: &[u8]) -> String {

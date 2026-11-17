@@ -81,7 +81,11 @@ send `Authorization: Bearer <token>`.
   environment (or `*`), read or write, carries the member's keys and is signed by the admin over
   `encode("envy-grant-v1", project, member, env, write, keys, approver)`. The server checks the
   signature and that the keys are the ones the member registered. The creator of a project
-  signs a grant of `*` with write to itself when it creates the project.
+  signs a grant of `*` with write to itself when it creates the project. Since the security
+  fixes after 4.0 a grant also carries a `version`, signed as `encode("envy-grant-v2", ...,
+  approver, version)`; a server that takes them says so in `info` (`versioned_grants`), and
+  clients send unversioned grants to one that doesn't. Each client keeps the highest version
+  it saw per member and environment and refuses older grants.
 - **Projects.** `project_create {id, recovery_public, head, wraps, index}` (any active member);
   `project_get {id}` returns the head, the index, the access list, every wrap addressed to the
   caller or to `recovery`, and the records of the environments the caller can read;

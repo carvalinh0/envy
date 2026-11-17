@@ -136,6 +136,7 @@ pub(crate) fn conformance(store: &dyn ServerStore) {
         },
         approver: "admin".into(),
         signature: "s".into(),
+        version: 0,
     };
     store.set_access("p", &read).unwrap();
     store

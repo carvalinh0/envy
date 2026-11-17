@@ -28,8 +28,12 @@ arguments now refuses to start; pass `--behind-proxy` (with a TLS proxy in front
 `--tls-key`. The rate limit behind a proxy uses the last `X-Forwarded-For` address. An admin needs
 write access to an environment to remove its key wraps, and can't replace the recovery key's wraps.
 
+Grants carry a version. Update the server first: a client only sends versioned grants to a server
+that announces them, and grants given by 4.0 stay valid.
+
 **Library (`dot-envy` crate):** `MigrateArgs` gained `creator`, `ImportArgs::key` is an
-`Option<String>`, and `RemoteVault` gained `unconfirmed_creator`.
+`Option<String>`, `RemoteVault` gained `unconfirmed_creator`, and `Access` and `ServerInfo` gained
+`version` and `versioned_grants`.
 
 ## 4.0
 

@@ -63,6 +63,8 @@ pub struct Session {
     pub url: String,
     pub identity: Identity,
     server_id: String,
+    /// Whether the server takes grants with a version (see [`ServerInfo`]).
+    versioned_grants: bool,
     token: RefCell<Option<String>>,
 }
 
@@ -117,6 +119,15 @@ struct ServerPins {
     /// accepted again.
     #[serde(default)]
     recoveries: BTreeMap<String, Vec<String>>,
+    /// The highest grant version seen per project and `member/environment`. An older grant
+    /// was replaced and is never trusted again.
+    #[serde(default)]
+    grants: BTreeMap<String, BTreeMap<String, u64>>,
+}
+
+/// The key of a grant in [`ServerPins::grants`]. Member names can't contain `/`.
+fn grant_slot(access: &Access) -> String {
+    format!("{}/{}", access.member, access.env)
 }
 
 /// What this machine learnt about each server: its id, the keys of its members and the
@@ -177,6 +188,8 @@ struct Opened {
     creator: String,
     keys: BTreeMap<KeySlot, Key32>,
     names: BTreeMap<String, String>,
+    /// The highest version this machine saw of each grant (see [`ServerPins::grants`]).
+    grant_floor: BTreeMap<String, u64>,
 }
 
 impl Opened {
@@ -256,7 +269,23 @@ impl Opened {
             .members
             .get(&access.member)
             .is_none_or(|pinned| *pinned == keys);
-        (signed && matches_pin && !self.removed.contains(&access.member)).then_some(keys)
+        let current = self
+            .grant_floor
+            .get(&grant_slot(access))
+            .is_none_or(|floor| access.version >= *floor);
+        (signed && matches_pin && current && !self.removed.contains(&access.member)).then_some(keys)
+    }
+
+    /// The version a new grant of `env` to `member` gets: above every one seen.
+    fn next_grant_version(&self, member: &str, env: &str) -> u64 {
+        let seen = self
+            .view
+            .access
+            .iter()
+            .filter(|a| a.member == member && a.env == env)
+            .map(|a| a.version);
+        let floor = self.grant_floor.get(&format!("{member}/{env}")).copied();
+        seen.chain(floor).max().unwrap_or(0).saturating_add(1)
     }
 
     /// The grants this machine trusts: the creator's grant to itself, then, until nothing
@@ -526,6 +555,7 @@ fn grant(
     (member, keys): (&str, &PublicKeys),
     env: &str,
     write: bool,
+    version: u64,
 ) -> Access {
     let mut access = Access {
         member: member.to_string(),
@@ -534,6 +564,7 @@ fn grant(
         keys: MemberKeys::of(keys),
         approver: session.identity.name.clone(),
         signature: String::new(),
+        version: if session.versioned_grants { version } else { 0 },
     };
     access.signature = session.sign(&grant_message(project, &access));
     access
@@ -674,6 +705,10 @@ impl<'a> RemoteVault<'a> {
 
     /// The id of the server at `url`, checked against the one pinned for that URL.
     pub fn server_id(&self, transport: &dyn Transport, url: &str) -> Result<String> {
+        Ok(self.server_info(transport, url)?.server_id)
+    }
+
+    fn server_info(&self, transport: &dyn Transport, url: &str) -> Result<ServerInfo> {
         let info: ServerInfo = anonymous(transport, &Request::Info)?;
         self.pins.update(url, |pins| {
             if pins.server_id.is_empty() {
@@ -681,7 +716,7 @@ impl<'a> RemoteVault<'a> {
             } else if pins.server_id != info.server_id {
                 bail!("{url} is not the Envy server this machine knew (its id changed). Nothing was sent.");
             }
-            Ok(info.server_id)
+            Ok(info)
         })
     }
 
@@ -693,12 +728,13 @@ impl<'a> RemoteVault<'a> {
             anyhow!("This machine has no identity for {url}. Run `envy login {url} --invite <code>`.")
         })?;
         let transport = self.connect(url)?;
-        let server_id = self.server_id(&*transport, url)?;
+        let info = self.server_info(&*transport, url)?;
         let session = Rc::new(Session {
             transport,
             url: url.to_string(),
             identity,
-            server_id,
+            server_id: info.server_id,
+            versioned_grants: info.versioned_grants,
             token: RefCell::new(None),
         });
         self.sessions
@@ -756,7 +792,8 @@ impl<'a> RemoteVault<'a> {
             project: project.to_string(),
         })?;
         check_view(project, &view, &roster.keys)?;
-        let creator = self.pins.update(&session.url, |pins| {
+        let (creator, grant_floor) = self.pins.update(&session.url, |pins| {
+            let floor = pins.grants.get(project).cloned().unwrap_or_default();
             let seen = pins.heads.entry(project.to_string()).or_insert(0);
             if view.head.seq < *seen {
                 bail!(
@@ -766,7 +803,7 @@ impl<'a> RemoteVault<'a> {
                 );
             }
             *seen = view.head.seq;
-            creator_of(pins, project, &view, &roster.keys)
+            Ok((creator_of(pins, project, &view, &roster.keys)?, floor))
         })?;
         let keys = unwrap_for(
             project,
@@ -789,10 +826,24 @@ impl<'a> RemoteVault<'a> {
             creator,
             keys,
             names,
+            grant_floor,
         };
         opened.check_writers()?;
         self.check_recovery(&opened)?;
+        self.pin_grants(&opened.session.url, project, &opened.trusted_grants())?;
         Ok(opened)
+    }
+
+    /// Remembers the version of trusted grants, so the ones they replaced are refused later.
+    fn pin_grants(&self, url: &str, project: &str, grants: &[(&Access, PublicKeys)]) -> Result<()> {
+        self.pins.update(url, |pins| {
+            let floor = pins.grants.entry(project.to_string()).or_default();
+            for (access, _) in grants {
+                let pinned = floor.entry(grant_slot(access)).or_insert(0);
+                *pinned = (*pinned).max(access.version);
+            }
+            Ok(())
+        })
     }
 
     /// The recovery key receives every key of the project, so it must be one this machine
@@ -908,6 +959,7 @@ impl<'a> RemoteVault<'a> {
             (&session.identity.name, &me),
             ALL_ENVIRONMENTS,
             true,
+            1,
         );
         let names = keys::random_key();
         let mut opened = Opened {
@@ -930,6 +982,7 @@ impl<'a> RemoteVault<'a> {
             creator: session.identity.name.clone(),
             keys: BTreeMap::from([(names_slot(), names.clone())]),
             names: BTreeMap::new(),
+            grant_floor: BTreeMap::new(),
         };
         opened.view.recovery = opened.signed_recovery(&recovery_public);
         let wraps = vec![
@@ -994,12 +1047,19 @@ impl<'a> RemoteVault<'a> {
                 "The fingerprint of '{name}' on the server is not the one given. Nothing was shared."
             );
         }
-        for env in envs {
-            let access = grant(&session, project, (name, &keys), env, write);
+        let versions: Vec<u64> = {
+            let opened = self.open(project)?;
+            envs.iter()
+                .map(|env| opened.next_grant_version(name, env))
+                .collect()
+        };
+        for (env, version) in envs.iter().zip(versions) {
+            let access = grant(&session, project, (name, &keys), env, write, version);
             session.call::<Done>(&Request::Grant {
                 project: project.to_string(),
-                access,
+                access: access.clone(),
             })?;
+            self.pin_grants(&session.url, project, &[(&access, keys)])?;
         }
         self.forget(project);
         self.write(project, |opened| {
@@ -1128,6 +1188,7 @@ impl Opened {
             creator: opened.creator.clone(),
             keys: BTreeMap::new(),
             names: BTreeMap::new(),
+            grant_floor: opened.grant_floor.clone(),
         }
     }
 }
