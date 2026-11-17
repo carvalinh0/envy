@@ -11,7 +11,14 @@ fn envy(dir: &tempfile::TempDir) -> Command {
         .env_remove("FILE_NAME")
         .env_remove("SCHEMA_PATH")
         // The tests must not depend on (or hit) the network.
-        .env("ENVY_NO_UPDATE_CHECK", "1");
+        .env("ENVY_NO_UPDATE_CHECK", "1")
+        // Nor on the user's configuration or data: the data folder is inside the test's one.
+        .env_remove("ENVY_BACKEND")
+        .env_remove("ENVY_SERVER")
+        .env_remove("ENVY_IDENTITY")
+        .env_remove("ENVY_VAULT_PASSWORD")
+        .env("XDG_DATA_HOME", dir.path().join(".data"))
+        .env("LOCALAPPDATA", dir.path().join(".data"));
     cmd
 }
 
@@ -59,7 +66,6 @@ fn help_lists_every_command_of_the_readme() {
         "unprotect",
         "migrate",
         "vault",
-        "serve",
     ] {
         assert!(
             out.lines().any(|l| l.trim_start().starts_with(command)),
@@ -277,14 +283,9 @@ fn a_backend_without_values_fails_only_when_values_are_needed() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "The remote backend is not available in this build",
+            "This project has no Envy server on this machine. Run `envy login <url>`.",
         ));
-    // The data folder is a temporary one, so the user's real vaults are never read.
-    let data = tempfile::tempdir().unwrap();
     envy(&dir)
-        .env("XDG_DATA_HOME", data.path())
-        .env("LOCALAPPDATA", data.path())
-        .env("HOME", data.path())
         .args(["--backend", "file", "ls", "dev"])
         .assert()
         .failure()

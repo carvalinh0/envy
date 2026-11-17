@@ -138,7 +138,7 @@ fn impossible_migrations_are_refused() {
     let err = h.err(&["migrate", "--to", "file"]);
     assert!(err.contains("already uses the file backend"), "{err}");
     let err = h.err(&["migrate", "--to", "remote"]);
-    assert!(err.contains("remote backend is not available"), "{err}");
+    assert!(err.contains("Run `envy login <url>`"), "{err}");
 }
 
 #[test]

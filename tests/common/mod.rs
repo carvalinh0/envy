@@ -9,6 +9,7 @@ use std::{
     io::Write,
     path::PathBuf,
     rc::Rc,
+    sync::Arc,
 };
 
 use anyhow::{Result, anyhow};
@@ -21,14 +22,20 @@ use dot_envy::{
     bundle::AesGcmCodec,
     cli::Cli,
     clock::Clock,
+    clock::SystemClock,
     config::Config,
     context::Context,
     envy::{Envy, GLOBAL_ENV, Schema, VarDetail},
     inference::HeuristicInferrer,
     keys::KdfParams,
     prompt::Prompter,
+    remote::{
+        client::RemoteVault,
+        transport::{LocalTransport, Transport},
+    },
     runner::ProcessRunner,
     schema::Secret,
+    server::{MemoryStore, ServerCore},
     state::FileState,
     update::{ReleaseSource, SelfUpdater, UpdateMethod},
     vault::{Change, DEFAULT_KEEP, EncryptedFileVault, MemoryVault, SecretVault},
@@ -36,6 +43,9 @@ use dot_envy::{
 use tempfile::TempDir;
 
 pub const PROJECT_ID: &str = "proj-1";
+
+/// The URL of the in-process server every harness talks to.
+pub const SERVER: &str = "https://envy.test";
 
 /// Argon2id parameters cheap enough for tests. They are stored in the vault file.
 pub const FAST_KDF: KdfParams = KdfParams { m: 64, t: 1, p: 1 };
@@ -243,10 +253,30 @@ pub struct Harness {
     /// The real log, written to a hidden folder of the temporary directory (hidden so
     /// `check -r` and the `.env` scan never see it).
     pub audit: FileAudit,
+    /// An Envy server in this process; harnesses made with [`Harness::sharing`] use the same
+    /// one, like machines of a team.
+    pub server: Arc<ServerCore>,
+    /// The root token printed when the server was initialised.
+    pub root_token: String,
 }
 
 impl Harness {
     pub fn new() -> Self {
+        let server = Arc::new(ServerCore::new(
+            Box::new(MemoryStore::default()),
+            Box::new(SystemClock),
+            chrono::Duration::hours(12),
+        ));
+        let root_token = server.init().unwrap();
+        Self::with_server(server, root_token)
+    }
+
+    /// Another machine of the same team: a new folder, the same server.
+    pub fn sharing(other: &Harness) -> Self {
+        Self::with_server(other.server.clone(), other.root_token.clone())
+    }
+
+    fn with_server(server: Arc<ServerCore>, root_token: String) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let mut config = Config::new(dir.path(), "envy.json", "schemas/v1.json");
         config.user = "tester".into();
@@ -263,6 +293,8 @@ impl Harness {
             updater: FakeUpdater::default(),
             clock: FakeClock::default(),
             audit,
+            server,
+            root_token,
         }
     }
 
@@ -271,9 +303,9 @@ impl Harness {
     pub fn cd(&mut self, relative: &str) {
         let dir = self.dir.path().join(relative);
         fs::create_dir_all(&dir).unwrap();
-        let mut config = Config::new(&dir, &self.config.file_name, &self.config.schema_path);
-        config.user = self.config.user.clone();
-        config.protect_password = self.config.protect_password.clone();
+        let mut config = self.config.clone();
+        config.start_dir = dir.clone();
+        config.base_dir = dir;
         self.config = config.discover();
         self.state = FileState::new(self.config.state_path());
     }
@@ -323,9 +355,22 @@ impl Harness {
         )
         .with_kdf(FAST_KDF);
         let choices = FileBackends::new(Some(self.data_dir()));
+        let server = self.server.clone();
+        let remote = RemoteVault::new(
+            &choices,
+            self.config.server_url.clone(),
+            &self.vault,
+            self.config.identity.as_ref(),
+            Some(self.data_dir()),
+            Box::new(move |_url: &str| -> Result<Box<dyn Transport>> {
+                Ok(Box::new(LocalTransport::new(server.clone(), "harness")))
+            }),
+        );
         let backends = Backends {
             keyring: &self.vault,
             file: &file,
+            remote: &remote,
+            identities: &self.vault,
             choices: &choices,
             forced: cli.backend,
         };

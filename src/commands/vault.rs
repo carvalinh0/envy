@@ -16,12 +16,12 @@ const CONFIRMED_WORDS: usize = 3;
 
 pub fn run(ctx: &Context, args: &VaultArgs, out: &mut dyn Write) -> Result<()> {
     let envy = ctx.load_envy()?;
-    let backend = ctx.backends.current(&envy.id)?;
-    if backend != Backend::File {
-        bail!(
-            "This project uses the {} backend; `envy vault` only manages the file backend (see `envy migrate --to file`).",
-            backend.name()
-        );
+    match ctx.backends.current(&envy.id)? {
+        Backend::File => {}
+        Backend::Remote => return remote(ctx, &envy, &args.action, out),
+        Backend::Keyring => bail!(
+            "This project uses the keyring backend; `envy vault` manages the file and remote backends (see `envy migrate`)."
+        ),
     }
     match &args.action {
         VaultAction::Password => password(ctx, &envy, out),
@@ -29,6 +29,49 @@ pub fn run(ctx: &Context, args: &VaultArgs, out: &mut dyn Write) -> Result<()> {
         VaultAction::Recover => recover(ctx, &envy, out),
         VaultAction::RecoveryKey => recovery_key(ctx, &envy, out),
     }
+}
+
+/// The keys of a project on a server. Members have no password there: they sign in with
+/// their identity.
+fn remote(ctx: &Context, envy: &Envy, action: &VaultAction, out: &mut dyn Write) -> Result<()> {
+    let remote = ctx.backends.remote;
+    match action {
+        VaultAction::Password => bail!(
+            "A project on a server has no password: each member signs in with their identity."
+        ),
+        VaultAction::Rekey { environment } => {
+            let environment = ctx.target_environment(envy, Some(environment))?;
+            let key_id = remote.rekey(&envy.id, &environment)?;
+            ctx.record(envy, "vault-rekey", Some(&environment), Vec::new())?;
+            writeln!(
+                out,
+                "'{environment}' is encrypted with a new key (key {key_id}) on the server."
+            )?;
+        }
+        VaultAction::Recover => {
+            let entropy = ask_recovery_key(ctx)?;
+            remote.recover(&envy.id, &entropy)?;
+            ctx.record(envy, "vault-recover", None, Vec::new())?;
+            writeln!(out, "Every key of this project is wrapped for you again.")?;
+        }
+        VaultAction::RecoveryKey => {
+            let entropy = new_recovery_key(ctx, out)?;
+            remote.replace_recovery(&envy.id, &entropy)?;
+            ctx.record(envy, "vault-recovery-key", None, Vec::new())?;
+            writeln!(
+                out,
+                "The new recovery key is in place; the old one no longer opens the keys."
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn ask_recovery_key(ctx: &Context) -> Result<Entropy> {
+    let phrase = ctx
+        .prompter
+        .ask_secret(&format!("Recovery key ({WORD_COUNT} words)"))?;
+    mnemonic::decode(phrase.expose_secret())
 }
 
 fn password(ctx: &Context, envy: &Envy, out: &mut dyn Write) -> Result<()> {
@@ -53,10 +96,7 @@ fn rekey(ctx: &Context, envy: &Envy, environment: &str, out: &mut dyn Write) -> 
 }
 
 fn recover(ctx: &Context, envy: &Envy, out: &mut dyn Write) -> Result<()> {
-    let phrase = ctx
-        .prompter
-        .ask_secret(&format!("Recovery key ({WORD_COUNT} words)"))?;
-    let entropy = mnemonic::decode(phrase.expose_secret())?;
+    let entropy = ask_recovery_key(ctx)?;
     let file = ctx.backends.file;
     file.check_recovery(&envy.id, &entropy)?;
     let new = new_password(ctx, false)?;

@@ -70,6 +70,10 @@ pub struct Envy {
     /// this key when they rewrite the manifest, which is harmless: the values stay encrypted.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub protected: BTreeSet<String>,
+    /// URL of the team's Envy server: only a hint for `envy login` without a URL. It never
+    /// changes where values are stored; each user chooses that.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
     pub schemas: BTreeMap<String, Schema>,
     /// Workspace root this project inherits from. Found at runtime, never written to disk.
     #[serde(skip)]
@@ -82,11 +86,12 @@ pub struct Envy {
 struct LaterKeys<'a> {
     history: &'a Option<HistoryConfig>,
     protected: &'a BTreeSet<String>,
+    server: &'a Option<String>,
 }
 
 impl LaterKeys<'_> {
     fn is_empty(&self) -> bool {
-        self.history.is_none() && self.protected.is_empty()
+        self.history.is_none() && self.protected.is_empty() && self.server.is_none()
     }
 }
 
@@ -101,6 +106,7 @@ impl Envy {
             workspace: None,
             history: None,
             protected: BTreeSet::new(),
+            server: None,
             schemas: BTreeMap::new(),
             parent: None,
         };
@@ -137,6 +143,7 @@ impl Envy {
         let later = LaterKeys {
             history: &self.history,
             protected: &self.protected,
+            server: &self.server,
         };
         let bytes = match (&self.workspace, later.is_empty()) {
             (None, true) => serde_json::to_vec(&base)?,
@@ -474,6 +481,7 @@ mod tests {
             workspace: None,
             history: None,
             protected: BTreeSet::new(),
+            server: None,
             schemas: BTreeMap::new(),
             parent: None,
         }

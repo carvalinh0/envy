@@ -27,11 +27,14 @@ pub fn dispatch(command: Commands, ctx: &Context, out: &mut dyn Write) -> Result
         Commands::List(args) => commands::list::run(ctx, &args, out)?,
         Commands::History(args) => commands::history::run(ctx, &args, out)?,
         Commands::Rollback(args) => commands::rollback::run(ctx, &args, out)?,
-        Commands::Audit => commands::audit::run(ctx, out)?,
+        Commands::Audit(args) => commands::audit::run(ctx, &args, out)?,
         Commands::Protect(args) => commands::protect::run(ctx, &args, out)?,
         Commands::Unprotect(args) => commands::unprotect::run(ctx, &args, out)?,
         Commands::Migrate(args) => commands::migrate::run(ctx, &args, out)?,
         Commands::Vault(args) => commands::vault::run(ctx, &args, out)?,
+        Commands::Login(args) => commands::login::run(ctx, &args, out)?,
+        Commands::Logout => commands::login::logout(ctx, out)?,
+        Commands::User(args) => commands::user::run(ctx, &args, out)?,
         Commands::Serve(args) => commands::serve::run(&args, out)?,
     }
     Ok(0)

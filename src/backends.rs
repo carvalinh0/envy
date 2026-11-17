@@ -13,20 +13,27 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     cli::Backend,
+    remote::client::RemoteVault,
     schema::Secret,
-    vault::{Change, EncryptedFileVault, SecretVault, UnavailableVault, Version},
+    vault::{Change, CredentialStore, EncryptedFileVault, SecretVault, Version},
 };
 
 pub trait BackendStore {
     fn chosen(&self, project: &str) -> Result<Option<Backend>>;
     /// `None` forgets the choice, so the project goes back to the default.
     fn choose(&self, project: &str, backend: Option<Backend>) -> Result<()>;
+    /// The server of a project, recorded by `envy login`.
+    fn remote_url(&self, project: &str) -> Result<Option<String>>;
+    fn set_remote_url(&self, project: &str, url: Option<&str>) -> Result<()>;
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Choices {
     #[serde(default)]
     projects: BTreeMap<String, Backend>,
+    /// Added in 4.0; older files have none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    remotes: BTreeMap<String, String>,
 }
 
 /// The choices of the user, in their data folder.
@@ -52,22 +59,15 @@ impl FileBackends {
     }
 }
 
-impl BackendStore for FileBackends {
-    fn chosen(&self, project: &str) -> Result<Option<Backend>> {
-        Ok(self.load()?.projects.get(project).copied())
-    }
-
-    fn choose(&self, project: &str, backend: Option<Backend>) -> Result<()> {
+impl FileBackends {
+    fn save(&self, change: impl FnOnce(&mut Choices)) -> Result<()> {
         let Some(path) = &self.path else {
             bail!(
                 "Envy found no folder for its data (set HOME, or LOCALAPPDATA on Windows), so it can't remember the backend."
             );
         };
         let mut choices = self.load()?;
-        match backend {
-            Some(backend) => choices.projects.insert(project.to_string(), backend),
-            None => choices.projects.remove(project),
-        };
+        change(&mut choices);
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir)
                 .with_context(|| format!("Could not create {}", dir.display()))?;
@@ -77,13 +77,42 @@ impl BackendStore for FileBackends {
     }
 }
 
-static REMOTE: UnavailableVault = UnavailableVault { backend: "remote" };
+impl BackendStore for FileBackends {
+    fn chosen(&self, project: &str) -> Result<Option<Backend>> {
+        Ok(self.load()?.projects.get(project).copied())
+    }
+
+    fn choose(&self, project: &str, backend: Option<Backend>) -> Result<()> {
+        self.save(|choices| {
+            match backend {
+                Some(backend) => choices.projects.insert(project.to_string(), backend),
+                None => choices.projects.remove(project),
+            };
+        })
+    }
+
+    fn remote_url(&self, project: &str) -> Result<Option<String>> {
+        Ok(self.load()?.remotes.get(project).cloned())
+    }
+
+    fn set_remote_url(&self, project: &str, url: Option<&str>) -> Result<()> {
+        self.save(|choices| {
+            match url {
+                Some(url) => choices.remotes.insert(project.to_string(), url.to_string()),
+                None => choices.remotes.remove(project),
+            };
+        })
+    }
+}
 
 /// Every backend, and the rule that picks one per project. It is itself a vault, so the
 /// commands and the resolver need not know where a value lives.
 pub struct Backends<'a> {
     pub keyring: &'a dyn SecretVault,
     pub file: &'a EncryptedFileVault<'a>,
+    pub remote: &'a RemoteVault<'a>,
+    /// Where `envy login` keeps the member identities (the OS keyring).
+    pub identities: &'a dyn CredentialStore,
     pub choices: &'a dyn BackendStore,
     /// `--backend` or `ENVY_BACKEND`.
     pub forced: Option<Backend>,
@@ -101,7 +130,7 @@ impl Backends<'_> {
         match backend {
             Backend::Keyring => self.keyring,
             Backend::File => self.file,
-            Backend::Remote => &REMOTE,
+            Backend::Remote => self.remote,
         }
     }
 
