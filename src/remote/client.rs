@@ -285,6 +285,65 @@ impl Opened {
         }
     }
 
+    /// Whether `member` may write `env`: the creator, this member itself (it trusts its own
+    /// signatures), or the holder of a trusted grant with write access to it.
+    fn may_write(&self, member: &str, env: &str) -> bool {
+        member == self.creator
+            || member == self.me()
+            || self.trusted_grants().iter().any(|(access, _)| {
+                access.member == member
+                    && access.write
+                    && (access.env == env || access.env == ALL_ENVIRONMENTS)
+            })
+    }
+
+    fn writes_anything(&self, member: &str) -> bool {
+        member == self.creator
+            || member == self.me()
+            || self
+                .trusted_grants()
+                .iter()
+                .any(|(access, _)| access.member == member && access.write)
+    }
+
+    /// A valid signature only says who wrote something; this says they were allowed to. A
+    /// member the server added can sign, but it is not in the chain of trusted grants, so
+    /// its values, keys and heads are refused. Wraps this member signed itself (after
+    /// `envy vault recover`) are its own.
+    fn check_writers(&self) -> Result<()> {
+        if !self.writes_anything(&self.view.head.signer) {
+            bail!(
+                "The state of '{}' on the server was not written by a trusted member. Nothing was used.",
+                self.project
+            );
+        }
+        if let Some(record) = self
+            .view
+            .records
+            .iter()
+            .find(|r| !self.may_write(&r.author, &r.env))
+        {
+            bail!(
+                "A value of '{}' on the server was not written by a member allowed to. Nothing was used.",
+                record.env
+            );
+        }
+        let wrap_ok = |w: &SignedWrap| {
+            w.signer == self.me()
+                || match w.purpose {
+                    Purpose::Dek => self.may_write(&w.signer, &w.env),
+                    Purpose::Names => self.writes_anything(&w.signer),
+                }
+        };
+        if self.view.wraps.iter().any(|w| !wrap_ok(w)) {
+            bail!(
+                "A key of '{}' on the server was not given by a member allowed to. Nothing was used.",
+                self.project
+            );
+        }
+        Ok(())
+    }
+
     /// Who may receive the key of `env`: this member and the holders of trusted grants for
     /// it. The access list comes from the server, so nothing unsigned decides where a key goes.
     fn readers(&self, env: &str) -> Vec<(String, PublicKey)> {
@@ -727,6 +786,7 @@ impl<'a> RemoteVault<'a> {
             keys,
             names,
         };
+        opened.check_writers()?;
         self.check_recovery(&opened)?;
         Ok(opened)
     }
@@ -923,7 +983,9 @@ impl<'a> RemoteVault<'a> {
                         .push(opened.wrap_for(slot, key, name, &keys.x25519_key())?);
                 }
             }
-            Ok(Some(commit))
+            // An admin holding no keys has nothing to give: it signs no new state, which
+            // members might not trust (see `envy vault recover`).
+            Ok((!commit.add_wraps.is_empty()).then_some(commit))
         })
     }
 

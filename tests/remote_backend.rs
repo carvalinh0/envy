@@ -582,3 +582,70 @@ fn a_new_admin_and_the_recovery_key_rescue_a_project() {
     dave.ok(&["run", "dev", "--", "node"]);
     assert_eq!(dave.runner.calls.borrow()[0].envs["API_TOKEN"], TOKEN);
 }
+
+/// The server adds eve and has her sign something; `change` edits the project with her key.
+fn eve_signs(
+    change: impl FnOnce(&mut dot_envy::server::ProjectState, &dot_envy::identity::Identity),
+) -> Harness {
+    let (h, _) = admin();
+    let eve = dot_envy::identity::Identity::generate("eve");
+    inject_eve(&h, &eve, "eve", &eve);
+    let store = h.server.store();
+    let mut state = store.project(PROJECT_ID).unwrap().unwrap();
+    let seq = state.head.seq;
+    change(&mut state, &eve);
+    assert!(store.put_project(PROJECT_ID, Some(seq), &state).unwrap());
+    h
+}
+
+#[test]
+fn a_value_signed_by_a_member_the_server_added_is_refused() {
+    use dot_envy::remote::protocol::record_message;
+    let h = eve_signs(|state, eve| {
+        let mut record = state
+            .records
+            .iter()
+            .find(|r| r.env == "dev")
+            .unwrap()
+            .clone();
+        record.version = 99;
+        record.author = "eve".into();
+        record.signature = base64_of(&eve.sign(&record_message(PROJECT_ID, &record)));
+        state.records.push(record);
+    });
+    let err = h.err(&["run", "dev", "--", "node"]);
+    assert!(err.contains("not written by a member allowed to"), "{err}");
+}
+
+#[test]
+fn a_state_signed_by_a_member_the_server_added_is_refused() {
+    use dot_envy::remote::protocol::head_message;
+    let h = eve_signs(|state, eve| {
+        state.head.seq += 1;
+        state.head.signer = "eve".into();
+        state.head.signature = base64_of(&eve.sign(&head_message(PROJECT_ID, &state.head)));
+    });
+    let err = h.err(&["run", "dev", "--", "node"]);
+    assert!(err.contains("not written by a trusted member"), "{err}");
+}
+
+#[test]
+fn a_key_given_by_a_member_the_server_added_is_refused() {
+    use dot_envy::remote::protocol::wrap_message;
+    let h = eve_signs(|state, eve| {
+        let mut wrap = state
+            .wraps
+            .iter()
+            .find(|w| w.member == "admin" && w.env == "dev")
+            .unwrap()
+            .clone();
+        wrap.signer = "eve".into();
+        wrap.signature = base64_of(&eve.sign(&wrap_message(PROJECT_ID, &wrap)));
+        state
+            .wraps
+            .retain(|w| !(w.member == "admin" && w.env == "dev"));
+        state.wraps.push(wrap);
+    });
+    let err = h.err(&["run", "dev", "--", "node"]);
+    assert!(err.contains("not given by a member allowed to"), "{err}");
+}

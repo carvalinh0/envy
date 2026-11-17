@@ -117,6 +117,12 @@ client only wraps keys for it when that member is the creator or holds a trusted
 access to every environment. Each client pins the recovery keys it accepted per project; a key replaced earlier is
 refused if the server presents it again. Only a writer of every environment may replace it.
 
+**Who may write.** A valid signature only names the writer, so clients also check the writer's
+role against the same chain: a record must be signed by a trusted writer of its environment, a
+wrap of an environment's key by a trusted writer of that environment (the name key: by any trusted
+writer), and a head by a trusted writer. The creator, and the member reading (for what it signed
+itself), always qualify. A member the server added can sign, but nothing it signs is used.
+
 On the server side, a member may wrap keys for itself with read access (that is how `envy vault
 recover` works), but giving a key to someone else, or replacing their wrap, takes write access to
 the environment or being an admin.
