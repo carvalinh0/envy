@@ -8,6 +8,7 @@
 # (`envy login https://envy.example.com --root-token <token> --name <name>`) and delete it.
 services:
   envy:
+    # In production, pin the release you tested (ghcr.io/carvalinh0/envy:vX.Y.Z) instead of latest.
     image: ghcr.io/carvalinh0/envy:latest
     command: ["--listen", "0.0.0.0:8443", "--behind-proxy"]
     read_only: true
@@ -20,7 +21,8 @@ services:
     restart: unless-stopped
 
   caddy:
-    image: caddy:2
+    # Pinned to a digest of caddy:2: a moved tag can't change the process that holds the TLS key.
+    image: caddy:2@sha256:4851e54a46b206517c574821bb5cc67f170d2156041e9fbc4c9193b45e84a75b
     command: caddy reverse-proxy --from envy.example.com --to envy:8443
     ports:
       - "443:443"
