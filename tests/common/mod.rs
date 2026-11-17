@@ -258,6 +258,8 @@ pub struct Harness {
     pub server: Arc<ServerCore>,
     /// The root token printed when the server was initialised.
     pub root_token: String,
+    /// Like a machine without a Secret Service (WSL, containers): every keyring access fails.
+    pub without_keyring: bool,
 }
 
 impl Harness {
@@ -295,6 +297,7 @@ impl Harness {
             audit,
             server,
             root_token,
+            without_keyring: false,
         }
     }
 
@@ -366,8 +369,14 @@ impl Harness {
                 Ok(Box::new(LocalTransport::new(server.clone(), "harness")))
             }),
         );
+        let missing = dot_envy::vault::UnavailableVault { backend: "keyring" };
+        let keyring: &dyn SecretVault = if self.without_keyring {
+            &missing
+        } else {
+            &self.vault
+        };
         let backends = Backends {
-            keyring: &self.vault,
+            keyring,
             file: &file,
             remote: &remote,
             identities: &self.vault,

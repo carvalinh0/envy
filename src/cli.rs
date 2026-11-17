@@ -291,6 +291,10 @@ pub struct MigrateArgs {
     /// Delete the values from the current backend once they are copied and checked
     #[arg(long)]
     pub remove_source: bool,
+    /// Start the new backend empty instead of copying (when the current one can't be read,
+    /// like a machine without a keyring)
+    #[arg(long, conflicts_with = "remove_source")]
+    pub fresh: bool,
 }
 
 #[derive(Debug, Args)]

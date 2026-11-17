@@ -21,6 +21,14 @@ pub fn run(ctx: &Context, args: &MigrateArgs, out: &mut dyn Write) -> Result<()>
     if from == to {
         bail!("This project already uses the {} backend.", to.name());
     }
+    // The current backend is read in full before the new one is created, so a source that
+    // can't be read (no keyring) leaves nothing half made. `--fresh` never reads it.
+    let source = ctx.backends.vault(from);
+    let slots = if args.fresh {
+        Vec::new()
+    } else {
+        readable_slots(source, &envy)?
+    };
     let keep_existing = match to {
         Backend::Remote => prepare_remote(ctx, &envy, out)?,
         Backend::File if !ctx.backends.file.exists(&envy.id) => {
@@ -30,11 +38,11 @@ pub fn run(ctx: &Context, args: &MigrateArgs, out: &mut dyn Write) -> Result<()>
         _ => false,
     };
 
-    let (source, target) = (ctx.backends.vault(from), ctx.backends.vault(to));
+    let target = ctx.backends.vault(to);
     let now = ctx.clock.now();
     let mut copied = Vec::new();
     let mut kept = Vec::new();
-    for (environment, key) in slots(&envy)? {
+    for (environment, key) in slots {
         let moved = Move {
             project: &envy.id,
             environment: &environment,
@@ -76,7 +84,7 @@ pub fn run(ctx: &Context, args: &MigrateArgs, out: &mut dyn Write) -> Result<()>
             kept.join(", ")
         )?;
     }
-    if !args.remove_source {
+    if !args.remove_source && !args.fresh {
         writeln!(
             out,
             "The {} backend still holds them: run again with --remove-source to delete them there.",
@@ -112,6 +120,15 @@ fn create_file_vault(ctx: &Context, envy: &Envy, out: &mut dyn Write) -> Result<
     let recovery = new_recovery_key(ctx, out)?;
     ctx.backends.file.create(&envy.id, &password, &recovery)?;
     ctx.record(envy, "vault-create", None, Vec::new())
+}
+
+/// The slots of the project, after checking the current backend answers for each of them.
+fn readable_slots(source: &dyn SecretVault, envy: &Envy) -> Result<Vec<(String, String)>> {
+    let slots = slots(envy)?;
+    for (environment, key) in &slots {
+        source.history(&envy.id, environment, key)?;
+    }
+    Ok(slots)
 }
 
 /// Every stored value a project can have: each variable of each environment, plus the
