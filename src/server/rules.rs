@@ -192,6 +192,23 @@ impl ServerCore {
         Ok(token)
     }
 
+    /// Removes a project, for the host operator: any active member can create a project under
+    /// an id read in a manifest before its owners do, and only the host can free that id. It
+    /// is not a request, so nobody can call it over the network.
+    pub fn remove_project(&self, id: &str) -> anyhow::Result<bool> {
+        let removed = self.store.delete_project(id)?;
+        if removed {
+            self.store.append_audit(&AuditEntry {
+                at: self.now(),
+                member: "host".into(),
+                action: "project-remove".into(),
+                project: Some(id.into()),
+                envs: Vec::new(),
+            })?;
+        }
+        Ok(removed)
+    }
+
     /// A request in JSON, as it arrives over HTTP. Returns the status and the JSON body.
     pub fn handle_json(&self, client: &str, token: Option<&str>, body: &[u8]) -> (u16, Vec<u8>) {
         let result = serde_json::from_slice::<Request>(body)
@@ -1473,6 +1490,19 @@ mod tests {
         };
         assert_eq!(status(f.call(Some(&bob_token), replace(RECOVERY))), 403);
         assert!(f.call(Some(&bob_token), replace("bob")).is_ok());
+    }
+
+    #[test]
+    fn the_host_removes_a_project_and_its_id_can_be_created_again() {
+        let f = fixture();
+        let (admin, token) = f.admin();
+        create(&f, &admin, &token);
+        assert!(f.core.remove_project("p").unwrap());
+        assert!(f.core.store().access("p").unwrap().is_empty());
+        let audit = f.core.store().audit(Some("p")).unwrap();
+        assert_eq!(audit.last().unwrap().action, "project-remove");
+        create(&f, &admin, &token);
+        assert!(!f.core.remove_project("nothing").unwrap());
     }
 
     #[test]

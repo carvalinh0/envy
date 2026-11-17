@@ -208,6 +208,17 @@ fn init_refuses_a_folder_that_already_holds_a_server() {
 }
 
 #[test]
+fn the_host_removes_a_project() {
+    let dir = TempDir::new().unwrap();
+    let data = dir.path().join("server");
+    init(&data);
+    let data = data.to_str().unwrap();
+    let out = envy(&["serve", "--data", data, "--remove-project", "nope"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("has no project 'nope'"));
+}
+
+#[test]
 fn oversized_requests_are_refused() {
     let dir = TempDir::new().unwrap();
     let data = dir.path().join("server");

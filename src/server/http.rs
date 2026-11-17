@@ -44,6 +44,13 @@ pub fn serve(args: &ServeArgs, out: &mut dyn Write) -> Result<()> {
         let token = core.new_root_token()?;
         return hand_over_root_token(&token, None, out);
     }
+    if let Some(project) = &args.remove_project {
+        if !core.remove_project(project)? {
+            bail!("The server has no project '{project}'.");
+        }
+        writeln!(out, "Removed the project '{project}' and its access.")?;
+        return Ok(());
+    }
     if core.store().meta("server_id")?.is_none() {
         bail!(
             "{} holds no Envy server yet; run `envy serve --init` first.",

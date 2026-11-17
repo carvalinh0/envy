@@ -130,6 +130,13 @@ impl ServerStore for MemoryStore {
         })
     }
 
+    fn delete_project(&self, id: &str) -> Result<bool> {
+        self.with(|s| {
+            s.access.retain(|(project, _)| project != id);
+            s.projects.remove(id).is_some()
+        })
+    }
+
     fn append_audit(&self, entry: &AuditEntry) -> Result<()> {
         self.with(|s| s.audit.push(entry.clone()))
     }

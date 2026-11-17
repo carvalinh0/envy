@@ -37,8 +37,9 @@ Grants carry a version. Update the server first: a client only sends versioned g
 that announces them, and grants given by 4.0 stay valid.
 
 **Library (`dot-envy` crate):** `MigrateArgs` gained `creator`, `ImportArgs::key` is an
-`Option<String>`, `RemoteVault` gained `unconfirmed_creator`, and `Access` and `ServerInfo` gained
-`version` and `versioned_grants`.
+`Option<String>`, `RemoteVault` gained `unconfirmed_creator`, `Access` and `ServerInfo` gained
+`version` and `versioned_grants`, `ServeArgs` gained `remove_project`, and `ServerStore` gained
+`delete_project` (its default refuses).
 
 ## 4.0
 

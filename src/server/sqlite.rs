@@ -242,6 +242,16 @@ impl ServerStore for SqliteStore {
         })
     }
 
+    fn delete_project(&self, id: &str) -> Result<bool> {
+        self.with(|c| {
+            let transaction = c.unchecked_transaction()?;
+            transaction.execute("DELETE FROM access WHERE project = ?1", [id])?;
+            let removed = transaction.execute("DELETE FROM projects WHERE id = ?1", [id])?;
+            transaction.commit()?;
+            Ok(removed == 1)
+        })
+    }
+
     fn append_audit(&self, entry: &AuditEntry) -> Result<()> {
         self.with(|c| {
             c.execute(

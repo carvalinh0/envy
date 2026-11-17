@@ -270,6 +270,7 @@ Runs an Envy server. Only in Linux builds with the `server` feature and in the D
 | `--init` | Prepare an empty data folder and print the root token once. |
 | `--init-output <file>` | With `--init`: write the root token to this new file instead. |
 | `--new-root-token` | Print a root token for an existing server, to add an admin. |
+| `--remove-project <id>` | Remove a project and its access from the server and exit, freeing its id. Its values are lost. Only on the host: no request does this. |
 
 Without a certificate the server refuses to listen anywhere but a loopback address unless
 `--behind-proxy` is given.

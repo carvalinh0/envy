@@ -53,5 +53,6 @@ Knowing the limits helps you use it safely:
 - **Replaced grants and removed members.** Grants carry a version and each client remembers the highest it saw, so a grant replaced later is refused, but only by machines that saw the newer one. A server can still present the grants of a removed member to a machine that never saw it removed. Grants from 4.0 have no version and stay valid until a versioned one replaces them.
 - **Machines that never ran `envy migrate`.** A CI job that only sets `ENVY_BACKEND=remote` trusts the creator the server shows the first time; `--creator` is only checked by `envy migrate --to remote`.
 - **Removing a member does not erase what it read.** `envy user rm` replaces the keys, but the values it could read must be changed.
+- **Project ids are first come, first served.** Any member can create a project under an id read in a manifest. Joining it needs its creator's fingerprint, so nothing is sent to it, and the host can remove it (`envy serve --remove-project`).
 - **The root token and the server host.** Whoever runs `envy serve --new-root-token` on the host can add an admin; that admin can manage members but can read nothing without being given keys or the recovery key.
 - **Bundle expiry is a convenience.** Releases older than 3.0 ignore it, and whoever has the bundle and the key can decrypt it at any time.

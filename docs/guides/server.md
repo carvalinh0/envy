@@ -27,6 +27,11 @@ anywhere but localhost.
 **Backups.** Everything is in `<data>/envy.db` (SQLite). Copy it while the server is stopped, or use
 `sqlite3 envy.db ".backup backup.db"`. A backup holds only ciphertext.
 
+**Someone took a project's id?** Any member can create a project under an id read in a manifest
+before its owners move it to the server; `envy migrate --to remote` then shows who created it
+instead of sending anything. On the server host, `envy serve --data <data> --remove-project <id>`
+removes that project and its access, so the owners can create it. Its values are lost.
+
 **Lost every admin?** On the server host, `envy serve --data <data> --new-root-token` prints a token
 that creates one more admin, who can invite and approve members again. An admin reads nothing by
 being one: values are only reachable for members who hold keys. If nobody with access to a project

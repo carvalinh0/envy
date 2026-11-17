@@ -408,6 +408,9 @@ pub struct ServeArgs {
     /// Print a new root token for an existing server (to add an admin) and exit
     #[arg(long, conflicts_with = "init")]
     pub new_root_token: bool,
+    /// Remove a project from the server and exit, freeing its id (its values are lost)
+    #[arg(long, value_name = "ID", conflicts_with_all = ["init", "new_root_token"])]
+    pub remove_project: Option<String>,
 }
 
 #[cfg(test)]
