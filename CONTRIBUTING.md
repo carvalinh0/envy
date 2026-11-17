@@ -63,6 +63,9 @@ Commands depend on abstractions, never on the operating system directly (SOLID):
 | `resolver` | Effective value of each variable (vault, `global`, workspace root, default). |
 | `vault` | `SecretVault` trait (values with history), `CredentialStore` (flat entries), `KeyringVault` (production), `MemoryVault` (tests), `EncryptedFileVault` (`vault/file.rs`, the file backend of ADR 0001) and `UnavailableVault` (the remote backend, not built yet). `vault/conformance.rs` is the suite every backend must pass. |
 | `backends` | Which backend holds each project (`backends.json`, `--backend`, `ENVY_BACKEND`) and `Backends`, the vault that routes every call by project id. |
+| `identity` | Member identities for the server: seed, X25519 and Ed25519 keys, fingerprints. |
+| `remote` | The server protocol (`protocol.rs`), its transports (`transport.rs`: HTTPS, or in-process for tests) and `RemoteVault` (`client.rs`). |
+| `server` | `ServerCore` (`rules.rs`): every rule of the server, with no I/O; `ServerStore` with `MemoryStore` (tests) and `SqliteStore`; the HTTP listener of `envy serve` (`http.rs`). SQLite and HTTP only build with `--features server` on Linux. |
 | `keys` | The cryptography of the encrypted vaults: canonical encoding, KEK, XChaCha20-Poly1305, name HMAC, X25519 wraps, padding. |
 | `mnemonic` | Recovery keys as 24 BIP-39 words, with the embedded English list. |
 | `protect` | Password-protected environments: sealing values and `ProtectedVault`, the vault commands use through `Context::secrets`. |
@@ -80,6 +83,10 @@ To add a command: add its arguments to `cli.rs`, create `commands/<name>.rs`, re
 ### Testing
 
 `tests/common/mod.rs` has a `Harness` that runs real arguments through `app::dispatch` with an in-memory vault, a scripted prompter, a recording process runner, a fixed clock and an audit log in the temporary folder. A new vault backend calls `vault::conformance::run` in its tests. Network access is behind `ReleaseSource`, and replacing the executable behind `SelfUpdater`, so the update tests never touch GitHub or the installed binary. `tests/cli_binary.rs` exercises the compiled binary and only uses commands that do not need a keyring.
+
+The OS keyring is the default cargo feature `keyring`; the server image builds with `--no-default-features --features server`. Run `cargo test --all-targets --features server` before touching `src/server/` or `src/remote/`: the default test run covers the server core in-process, but not SQLite and HTTP.
+
+Documentation ships with behaviour. `README.md` is the overview; commands and their options are in `docs/commands.md` (a test checks that every command has its section), manifest keys and variable types in `docs/manifest.md`, environment variables and files in `docs/configuration.md`, systems and versions in `docs/compatibility.md`, and what a major release asks of users in `docs/upgrading.md`.
 
 Decisions that are expensive to change (formats, key hierarchies) are recorded in `docs/adr/` before any code.
 

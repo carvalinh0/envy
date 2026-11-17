@@ -37,6 +37,31 @@ fn version_flag_and_subcommand() {
         .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
 }
 
+/// Every command of `envy help` has its section in the command reference, so the
+/// documentation can't silently fall behind the command line.
+#[test]
+fn every_command_is_documented_in_the_command_reference() {
+    let dir = tempfile::tempdir().unwrap();
+    let assert = envy(&dir).arg("help").assert().success();
+    let help = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let reference = include_str!("../docs/commands.md");
+    let commands: Vec<&str> = help
+        .lines()
+        .skip_while(|line| !line.starts_with("Commands:"))
+        .skip(1)
+        .take_while(|line| line.starts_with("  "))
+        .filter_map(|line| line.split_whitespace().next())
+        .filter(|command| *command != "help")
+        .collect();
+    assert!(commands.len() > 20, "{help}");
+    for command in commands {
+        assert!(
+            reference.contains(&format!("### `envy {command}")),
+            "`envy {command}` has no section in docs/commands.md"
+        );
+    }
+}
+
 #[test]
 fn help_lists_every_command_of_the_readme() {
     let dir = tempfile::tempdir().unwrap();
