@@ -31,7 +31,8 @@ anywhere but localhost.
 that creates one more admin, who can invite and approve members again. An admin reads nothing by
 being one: values are only reachable for members who hold keys. If nobody with access to a project
 is left, approve a member for it and have them run `envy vault recover` with the project's recovery
-key, which wraps every key for them again.
+key, which wraps every key for them again. Other members only trust what that member writes once an
+admin whose access comes from the project's creator grants it write access.
 
 ## Team workflow
 
@@ -96,7 +97,9 @@ The job then needs `ENVY_BACKEND=remote`, `ENVY_SERVER` and `ENVY_IDENTITY`. See
   knows (`envy user list` shows the fingerprints). A changed key, an unsigned value or a state older
   than one already seen is refused.
 - Keys are only wrapped for members whose access was signed by an admin trusted from the project's
-  creator, and for a recovery key set by such a member: the server can't add a recipient.
+  creator, and for a recovery key set by such a member: the server can't add a recipient. Values,
+  keys and project states are only used when written by such members, so the server can't add a
+  writer either.
 - If the server is down or misbehaves, commands that need a value fail. Nothing is cached on disk and
   nothing falls back to another backend.
 
