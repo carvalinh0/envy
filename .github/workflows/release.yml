@@ -6,8 +6,8 @@ name: Bump Version, Tag and create release
 # fix: Patch
 # : Patch
 #
-# The tag is always created. The binaries, the crates.io publish and the GitHub release only
-# happen when every test passes AND either:
+# The tag is always created. The binaries, the server image, the crates.io publish and the
+# GitHub release only happen when every test passes AND either:
 #   - the change is Minor (feat:) or Major (feat!:), or
 #   - the workflow was started manually (Actions -> run workflow, on main). A manual run
 #     releases the tag of the current commit (the one created by the last push, if any).
@@ -184,6 +184,37 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish --allow-dirty
+
+  docker:
+    # The server image (ADR 0002): built from the Dockerfile, which runs the tests of the
+    # server build first, and pushed to the GitHub Container Registry. The third-party
+    # actions are pinned to commits: they receive a token that can publish packages.
+    needs: [test, tag]
+    if: needs.tag.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Log in to the GitHub Container Registry
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the server image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          build-args: VERSION=${{ needs.tag.outputs.new_tag }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.tag.outputs.new_tag }}
+            ghcr.io/${{ github.repository }}:latest
 
   release:
     needs: [test, tag, build]
