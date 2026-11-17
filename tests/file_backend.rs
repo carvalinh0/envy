@@ -305,3 +305,26 @@ fn a_new_recovery_key_retires_the_old_one() {
     h.prompter.answers(&[&new, "p2", "p2"]);
     h.ok(&["vault", "recover"]);
 }
+
+#[test]
+fn a_machine_without_a_keyring_starts_a_file_vault_fresh() {
+    let mut h = Harness::with_manifest();
+    h.without_keyring = true;
+    let h = with_password(h, PASSWORD);
+    let err = h.err(&["migrate", "--to", "file"]);
+    assert!(err.contains("keyring backend is not available"), "{err}");
+    assert!(
+        !h.data_dir()
+            .join(format!("vaults/{PROJECT_ID}.json"))
+            .exists()
+    );
+
+    let out = h.ok(&["migrate", "--to", "file", "--fresh"]);
+    assert!(out.contains("Copied 0 value(s)"), "{out}");
+    assert!(
+        !out.contains("--remove-source"),
+        "nothing was left behind: {out}"
+    );
+    h.ok(&["set", "dev", "API_TOKEN", TOKEN]);
+    assert!(h.ok(&["ls", "dev", "--show"]).contains(TOKEN));
+}
