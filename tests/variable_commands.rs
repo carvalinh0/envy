@@ -74,6 +74,86 @@ fn set_never_prints_the_value() {
     assert!(!out.contains(SECRET_VALUE), "{out}");
 }
 
+#[test]
+fn set_stdin_stores_the_piped_value_without_its_line_break() {
+    let h = Harness::with_manifest();
+    h.prompter.pipe(&format!("{SECRET_VALUE}\n"));
+    let out = h.ok(&["set", "dev", "API_TOKEN", "--stdin"]);
+    assert!(out.contains("Stored 'API_TOKEN' in 'dev'"), "{out}");
+    assert!(!out.contains(SECRET_VALUE), "{out}");
+    assert_eq!(
+        h.stored(PROJECT_ID, "dev", "API_TOKEN").as_deref(),
+        Some(SECRET_VALUE)
+    );
+}
+
+#[test]
+fn set_stdin_removes_a_windows_line_break() {
+    let h = Harness::with_manifest();
+    h.prompter.pipe(&format!("{SECRET_VALUE}\r\n"));
+    h.ok(&["set", "dev", "API_TOKEN", "--stdin"]);
+    assert_eq!(
+        h.stored(PROJECT_ID, "dev", "API_TOKEN").as_deref(),
+        Some(SECRET_VALUE)
+    );
+}
+
+#[test]
+fn set_stdin_keeps_everything_but_the_last_line_break() {
+    let h = Harness::with_manifest();
+    h.prompter.pipe(&format!(" {SECRET_VALUE}\n\n"));
+    h.ok(&["set", "dev", "API_TOKEN", "--stdin"]);
+    assert_eq!(
+        h.stored(PROJECT_ID, "dev", "API_TOKEN").as_deref(),
+        Some(format!(" {SECRET_VALUE}\n").as_str())
+    );
+}
+
+#[test]
+fn set_stdin_typechecks_without_echoing_the_value() {
+    let h = Harness::with_manifest();
+    h.prompter.pipe("not-a-port\n");
+    let err = h.err(&["set", "dev", "PORT", "--stdin"]);
+    assert!(
+        err.contains("Invalid value for 'PORT' (expected port)"),
+        "{err}"
+    );
+    assert!(!err.contains("not-a-port"), "{err}");
+    assert!(h.vault.is_empty());
+}
+
+/// A rotation script whose generator failed pipes nothing: the current value must survive.
+#[test]
+fn set_stdin_refuses_an_empty_input_and_keeps_the_value() {
+    let h = ready();
+    h.prompter.pipe("\n");
+    let err = h.err(&["set", "dev", "API_TOKEN", "--stdin"]);
+    assert!(err.contains("Nothing was piped"), "{err}");
+    assert_eq!(
+        h.stored(PROJECT_ID, "dev", "API_TOKEN").as_deref(),
+        Some(SECRET_VALUE)
+    );
+}
+
+#[test]
+fn set_stdin_without_a_pipe_fails() {
+    let h = Harness::with_manifest();
+    let err = h.err(&["set", "dev", "API_TOKEN", "--stdin"]);
+    assert!(err.contains("Nothing is piped to Envy"), "{err}");
+    assert!(h.vault.is_empty());
+}
+
+#[test]
+fn set_takes_a_value_or_stdin_but_not_both() {
+    let h = Harness::with_manifest();
+    let missing = h.err(&["set", "dev", "API_TOKEN"]);
+    assert!(missing.contains("required arguments"), "{missing}");
+    h.prompter.pipe("piped");
+    let both = h.err(&["set", "dev", "API_TOKEN", "argument", "--stdin"]);
+    assert!(both.contains("cannot be used with"), "{both}");
+    assert!(h.vault.is_empty());
+}
+
 // ---------- ls ----------
 
 #[test]

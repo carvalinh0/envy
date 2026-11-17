@@ -70,6 +70,10 @@ compares their declarations (variables only in one of them, and different types)
 Stores a value. The variable must be declared in the environment (or in `global`) and the value must
 match its type. The value can end up in your shell history; prefer `envy fill`.
 
+| Option | What it does |
+| :-- | :-- |
+| `--stdin` | Read the value from standard input instead of the argument, without its last line break. For scripts: an argument is visible to other processes while Envy runs. Empty input and a terminal are refused, and the stored value is kept. |
+
 ### `envy fill [environment]`
 
 Asks, with hidden input, for every variable of the environment that has no value. An empty answer

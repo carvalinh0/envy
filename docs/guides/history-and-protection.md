@@ -39,6 +39,31 @@ manifest. Protect `global` too if it holds secrets that a protected environment 
 `envy check` and `envy ls` warn when the stored value is older than that (`h`, `d` or `w`). The exit
 code does not change; Envy never changes a value by itself.
 
+## Rotating a value with a script
+
+Only the service that issued a credential (a database, a cloud provider) can replace it, so the
+rotation belongs to a script that talks to the service and then stores the new value. Pipe it to
+`envy set --stdin`: an argument would be visible to other processes. For a Postgres password:
+
+```sh
+#!/bin/sh
+# envy run prod -- ./rotate-db-password.sh
+set -eu
+new=$(openssl rand -hex 32)
+printf '%s' "$new" | envy set prod DB_PASSWORD --stdin
+if ! printf "ALTER USER app WITH PASSWORD '%s';\n" "$new" | psql "$DATABASE_ADMIN_URL" -v ON_ERROR_STOP=1; then
+  envy rollback DB_PASSWORD --in prod
+  exit 1
+fi
+```
+
+Storing first means a failure never loses the new password: if the database refuses it, the rollback
+restores the old value, and the replaced value stays in `envy history` either way. Applications read
+values when they start (`envy run`), so restart them afterwards. To avoid the gap between the change
+and the restart, use credentials that can overlap (two access keys, or two database users rotated in
+turn). `envy run` does not pass `ENVY_PROTECT_PASSWORD` to the script, so a protected environment asks
+for its password again.
+
 ## Bundles that expire
 
 `envy export dev --ttl 7d` writes the expiry inside the encrypted bundle, and `envy import` refuses it

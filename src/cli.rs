@@ -191,7 +191,12 @@ pub struct UpArgs {
 pub struct SetArgs {
     pub environment: String,
     pub secret: String,
-    pub value: String,
+    /// The value. Other processes can read it while Envy runs: scripts should use --stdin
+    #[arg(required_unless_present = "stdin")]
+    pub value: Option<String>,
+    /// Read the value from standard input (without its last line break)
+    #[arg(long, conflicts_with = "value")]
+    pub stdin: bool,
 }
 
 #[derive(Debug, Args)]
