@@ -324,3 +324,27 @@ fn a_backend_without_values_fails_only_when_values_are_needed() {
         .failure()
         .stderr(predicate::str::contains("ENVY_BACKEND='s3' is not valid"));
 }
+
+/// The real prompter reads the pipe. An empty pipe is refused before any vault is opened, so
+/// this runs without a keyring.
+#[test]
+fn set_stdin_reads_the_pipe_of_the_real_binary() {
+    let dir = tempfile::tempdir().unwrap();
+    envy(&dir)
+        .args(["init", "Demo", "--new"])
+        .assert()
+        .success();
+    envy(&dir).args(["schema", "dev"]).assert().success();
+    let path = dir.path().join("envy.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    manifest["schemas"]["dev"]["API_TOKEN"] = serde_json::json!({ "type": "secret" });
+    std::fs::write(&path, manifest.to_string()).unwrap();
+
+    envy(&dir)
+        .args(["set", "dev", "API_TOKEN", "--stdin"])
+        .write_stdin("\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Nothing was piped"));
+}

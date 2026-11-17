@@ -11,6 +11,13 @@ minisign signature (see [SECURITY.md](../SECURITY.md)).
 What each major release asks of you is below. See [compatibility](compatibility.md) for what older
 releases do with data written by newer ones.
 
+## 4.2
+
+**Command line:** nothing to do. `envy set` gained `--stdin`.
+
+**Library (`dot-envy` crate):** `SetArgs::value` is an `Option<String>` and `SetArgs` gained `stdin`.
+`Prompter` gained `read_stdin` (its default refuses).
+
 ## After 4.0: security fixes
 
 **Command line:**

@@ -36,7 +36,7 @@ Only the latest released version receives security fixes.
 Knowing the limits helps you use it safely:
 
 - **Same-user access.** Any process running as you can read your keyring while it is unlocked, and can read the environment of the processes started by `envy run`, and of `envy run` itself (`/proc/<pid>/environ`), which still holds `ENVY_IDENTITY` and the passwords when you set them.
-- **Shell history.** `envy set <env> <name> <value>` receives the value as an argument, so it can end up in your shell history and the process list. Prefer `envy fill`, which reads hidden input. The same goes for the key of `envy import` (leave it out to type it hidden) and for `envy login --invite` and `--root-token`.
+- **Shell history.** `envy set <env> <name> <value>` receives the value as an argument, so it can end up in your shell history and the process list. Prefer `envy fill`, which reads hidden input, or, in a script, pipe the value to `envy set <env> <name> --stdin`. The same goes for the key of `envy import` (leave it out to type it hidden) and for `envy login --invite` and `--root-token`.
 - **`envy ls --show`** prints real values to your terminal.
 - **Sharing the key with the bundle.** Send the export key through a different channel than the `.envy` file.
 - **`.envy-state`** only stores the active environment name, but should still stay out of Git.

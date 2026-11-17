@@ -125,6 +125,8 @@ pub struct FakePrompter {
     transcript: RefCell<Option<Transcript>>,
     /// Answers the recovery words wrongly, like a user who did not write them down.
     pub misremember_words: Cell<bool>,
+    /// What is piped to standard input; `None` is a terminal.
+    piped: RefCell<Option<String>>,
 }
 
 impl FakePrompter {
@@ -132,6 +134,10 @@ impl FakePrompter {
         self.answers
             .borrow_mut()
             .extend(values.iter().map(|v| v.to_string()));
+    }
+
+    pub fn pipe(&self, input: &str) {
+        *self.piped.borrow_mut() = Some(input.to_string());
     }
 }
 
@@ -156,6 +162,13 @@ impl Prompter for FakePrompter {
             .pop_front()
             .ok_or_else(|| anyhow!("the test did not provide an answer for '{label}'"))?;
         Ok(Secret::new(answer))
+    }
+
+    fn read_stdin(&self) -> Result<Secret> {
+        match self.piped.borrow_mut().take() {
+            Some(input) => Ok(Secret::new(input)),
+            None => Err(anyhow!("{}", dot_envy::prompt::NOTHING_PIPED)),
+        }
     }
 }
 
