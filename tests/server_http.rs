@@ -75,26 +75,33 @@ fn init(data: &Path) -> String {
         .to_string()
 }
 
+/// Starts `envy serve` on a free port. Another process may take the port between choosing
+/// it and the server binding it, so a server that exits early is started again elsewhere.
 fn start(data: &Path) -> Server {
-    let port = free_port();
-    let child = Command::new(ENVY)
-        .args(["serve", "--data", data.to_str().unwrap(), "--listen"])
-        .arg(format!("127.0.0.1:{port}"))
-        .spawn()
-        .unwrap();
-    // From here on, `Drop` stops the process whatever happens.
-    let server = Server {
-        child,
-        url: format!("http://127.0.0.1:{port}"),
-    };
-    for _ in 0..100 {
-        if ureq::get(format!("{}/v1/health", server.url))
-            .call()
-            .is_ok()
-        {
-            return server;
+    for _ in 0..5 {
+        let port = free_port();
+        let child = Command::new(ENVY)
+            .args(["serve", "--data", data.to_str().unwrap(), "--listen"])
+            .arg(format!("127.0.0.1:{port}"))
+            .spawn()
+            .unwrap();
+        // From here on, `Drop` stops the process whatever happens.
+        let mut server = Server {
+            child,
+            url: format!("http://127.0.0.1:{port}"),
+        };
+        for _ in 0..100 {
+            if ureq::get(format!("{}/v1/health", server.url))
+                .call()
+                .is_ok()
+            {
+                return server;
+            }
+            if server.child.try_wait().unwrap().is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
         }
-        thread::sleep(Duration::from_millis(50));
     }
     panic!("the server did not start");
 }
