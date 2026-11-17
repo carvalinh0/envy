@@ -1,0 +1,34 @@
+# An Envy server behind Caddy, which obtains and renews the TLS certificate.
+#
+#   docker compose run --rm envy --init --init-output /data/root-token
+#   docker compose run --rm --entrypoint "" envy /envy --version   # check the image
+#   docker compose up -d
+#
+# The root token is in the envy-data volume: read it once, give it to the first admin
+# (`envy login https://envy.example.com --root-token <token> --name <name>`) and delete it.
+services:
+  envy:
+    image: ghcr.io/carvalinh0/envy:latest
+    command: ["--listen", "0.0.0.0:8443", "--behind-proxy"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - envy-data:/data
+    expose:
+      - "8443"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    command: caddy reverse-proxy --from envy.example.com --to envy:8443
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - caddy-data:/data
+    restart: unless-stopped
+
+volumes:
+  envy-data:
+  caddy-data:
