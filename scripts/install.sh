@@ -11,12 +11,16 @@
 #   ENVY_VERSION      release tag to download, e.g. v1.2.3 (default: the latest release)
 #   ENVY_REPO         GitHub repository (default: carvalinh0/envy)
 #   ENVY_GITHUB_URL   GitHub base URL (default: https://github.com)
+#
+# When minisign is installed, the archive must carry the release key's signature
+# (key id FFEFC84D5F45A95F, the same key `envy update` checks).
 set -euo pipefail
 
 CRATE="dot-envy"
 REPO="${ENVY_REPO:-carvalinh0/envy}"
 GITHUB_URL="${ENVY_GITHUB_URL:-https://github.com}"
 INSTALL_DIR="${ENVY_INSTALL_DIR:-$HOME/.local/bin}"
+RELEASE_KEY="RWRfqUVfTcjv/06FBkCOswn6uHfKptnnu9z6h0mEaGqnqHS6bJHSqNeR"
 TMP_DIR=""
 
 cleanup() { [ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"; }
@@ -70,6 +74,22 @@ latest_tag() {
   esac
 }
 
+# Checks the minisign signature of the archive and that it was made for this tag and archive.
+verify_signature() {
+  local archive="$1" url="$2" tag="$3" asset="$4" comment
+  if ! command -v minisign >/dev/null 2>&1; then
+    warn "minisign is not installed, so the signature of $asset was not checked (https://jedisct1.github.io/minisign/)."
+    return 0
+  fi
+  curl -fsSL "$url.minisig" -o "$archive.minisig" \
+    || fail "could not download the signature of $asset; nothing was installed."
+  comment="$(minisign -V -P "$RELEASE_KEY" -m "$archive" -x "$archive.minisig" -Q)" \
+    || fail "the signature of $asset is not valid; nothing was installed."
+  [ "$comment" = "envy-release $tag $asset" ] \
+    || fail "the signature of $asset was made for another release; nothing was installed."
+  info "Signature of $asset checked."
+}
+
 install_with_binary() {
   command -v curl >/dev/null 2>&1 || fail "curl is required to download the prebuilt binary."
   command -v tar >/dev/null 2>&1 || fail "tar is required to extract the prebuilt binary."
@@ -85,6 +105,7 @@ install_with_binary() {
   info "Downloading $url"
   curl -fsSL "$url" -o "$TMP_DIR/envy.tar.gz" \
     || fail "could not download $url (does release $tag have a binary for $target?)"
+  verify_signature "$TMP_DIR/envy.tar.gz" "$url" "$tag" "$name.tar.gz"
   tar -xzf "$TMP_DIR/envy.tar.gz" -C "$TMP_DIR"
 
   mkdir -p "$INSTALL_DIR"

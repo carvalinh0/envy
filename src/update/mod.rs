@@ -3,6 +3,7 @@
 pub mod archive;
 pub mod installer;
 pub mod release;
+pub mod signature;
 pub mod version;
 
 pub use installer::{SelfUpdater, SystemUpdater, UpdateMethod};

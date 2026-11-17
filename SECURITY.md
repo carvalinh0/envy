@@ -28,7 +28,7 @@ Only the latest released version receives security fixes.
 - **Memory:** values are kept in types that are wiped on drop (`zeroize`) and print as `********` in `Display`/`Debug`. Error messages never include values, including the messages of value validation (`envy check`, `envy run`).
 - **Child processes:** `envy run` removes `ENVY_IDENTITY`, `ENVY_VAULT_PASSWORD` and `ENVY_PROTECT_PASSWORD` from the command's environment, so the command gets one environment's values and not the credentials that open every environment.
 - **Bundles:** `envy export` encrypts with AES-256-GCM using a random 256-bit key and a random nonce per bundle. The key is printed once and never stored. Any change to the file makes decryption fail.
-- **Updates:** `envy update` downloads over HTTPS from the project's GitHub releases (or runs `cargo install`) and replaces the executable atomically, so a failed download or a corrupted archive leaves the current binary untouched.
+- **Updates:** `envy update` downloads over HTTPS from the project's GitHub releases (or runs `cargo install`) and replaces the executable atomically, so a failed download or a corrupted archive leaves the current binary untouched. Every release archive is signed with minisign (public key `RWRfqUVfTcjv/06FBkCOswn6uHfKptnnu9z6h0mEaGqnqHS6bJHSqNeR`, id `FFEFC84D5F45A95F`) with a trusted comment naming the tag and the archive; `envy update` installs nothing without a valid signature for that release, and the install scripts check it when `minisign` is installed.
 - **Project binding:** a bundle only imports into a project with the same `id`.
 
 ## What Envy does not protect against
@@ -40,7 +40,7 @@ Knowing the limits helps you use it safely:
 - **`envy ls --show`** prints real values to your terminal.
 - **Sharing the key with the bundle.** Send the export key through a different channel than the `.envy` file.
 - **`.envy-state`** only stores the active environment name, but should still stay out of Git.
-- **Update integrity.** Releases do not publish checksums or signatures yet, so `envy update` trusts GitHub and TLS only.
+- **Update integrity.** The signature covers the prebuilt archives: `cargo install` (and the `cargo install` path of `envy update` and of the install scripts) trusts crates.io, and the Docker image trusts the GitHub Container Registry. The install scripts only warn when `minisign` is missing, and releases before the signatures (4.0 and earlier) update without checking them.
 - **Windows and macOS** keyring backends are compiled in but not tested yet.
 - **Protection is per machine.** A teammate's values are only encrypted after they run `envy protect` themselves (`envy check` warns them). Values of `global` and of a workspace root are only protected if those environments are. A process running as you can still read the environment of `envy run`, and an attacker who learns the password can decrypt the values copied from your keyring offline.
 - **Older releases.** An Envy older than 3.0 that rewrites the manifest drops `protected`, `history` and `rotate`. Encrypted values stay encrypted (it injects them as ciphertext), but values it writes are stored unencrypted and outside the history.

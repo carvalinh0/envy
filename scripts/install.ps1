@@ -10,12 +10,16 @@
 #   ENVY_VERSION      release tag to download, e.g. v1.2.3 (default: the latest release)
 #   ENVY_REPO         GitHub repository (default: carvalinh0/envy)
 #   ENVY_GITHUB_URL   GitHub base URL (default: https://github.com)
+#
+# When minisign is installed, the archive must carry the release key's signature
+# (key id FFEFC84D5F45A95F, the same key `envy update` checks).
 $ErrorActionPreference = "Stop"
 
 $Crate = "dot-envy"
 $Repo = if ($env:ENVY_REPO) { $env:ENVY_REPO } else { "carvalinh0/envy" }
 $GithubUrl = if ($env:ENVY_GITHUB_URL) { $env:ENVY_GITHUB_URL } else { "https://github.com" }
 $InstallDir = if ($env:ENVY_INSTALL_DIR) { $env:ENVY_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "envy\bin" }
+$ReleaseKey = "RWRfqUVfTcjv/06FBkCOswn6uHfKptnnu9z6h0mEaGqnqHS6bJHSqNeR"
 
 function Install-WithCargo {
     if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { return $false }
@@ -37,6 +41,25 @@ function Get-LatestTag {
     return $release.tag_name
 }
 
+# Checks the minisign signature of the archive and that it was made for this tag and archive.
+function Test-Signature($Archive, $Url, $Tag, $Asset) {
+    if (-not (Get-Command minisign -ErrorAction SilentlyContinue)) {
+        Write-Warning "minisign is not installed, so the signature of $Asset was not checked (https://jedisct1.github.io/minisign/)."
+        return
+    }
+    try {
+        Invoke-WebRequest -Uri "$Url.minisig" -OutFile "$Archive.minisig"
+    } catch {
+        throw "Could not download the signature of $Asset; nothing was installed."
+    }
+    $comment = & minisign -V -P $ReleaseKey -m $Archive -x "$Archive.minisig" -Q
+    if ($LASTEXITCODE -ne 0) { throw "The signature of $Asset is not valid; nothing was installed." }
+    if ("$comment".Trim() -ne "envy-release $Tag $Asset") {
+        throw "The signature of $Asset was made for another release; nothing was installed."
+    }
+    Write-Host "==> Signature of $Asset checked."
+}
+
 function Install-WithBinary {
     if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
         throw "There is no prebuilt binary for $($env:PROCESSOR_ARCHITECTURE). Install Rust (https://rustup.rs) and run: cargo install $Crate"
@@ -56,6 +79,7 @@ function Install-WithBinary {
         } catch {
             throw "Could not download $url (does release $tag have a binary for $target?)"
         }
+        Test-Signature (Join-Path $tmp "envy.zip") $url $tag "$name.zip"
         Expand-Archive -Path (Join-Path $tmp "envy.zip") -DestinationPath $tmp
 
         New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null

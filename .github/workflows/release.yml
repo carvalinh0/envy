@@ -234,6 +234,30 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # Every archive gets a minisign signature whose trusted comment names the tag and the
+      # archive; `envy update` and the install scripts check both against the release key built
+      # into them (src/update/signature.rs). The secret key has no password: the repository
+      # secret MINISIGN_SECRET_KEY protects it. Signing stops the release if the secret is
+      # missing or does not match that public key.
+      - name: Sign the archives
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          RELEASE_KEY: RWRfqUVfTcjv/06FBkCOswn6uHfKptnnu9z6h0mEaGqnqHS6bJHSqNeR
+          TAG: ${{ needs.tag.outputs.new_tag }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y minisign
+          key="$RUNNER_TEMP/release.key"
+          trap 'rm -f "$key"' EXIT
+          (umask 077 && printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key")
+          shopt -s nullglob
+          archives=(dist/*.tar.gz dist/*.zip)
+          [ "${#archives[@]}" -gt 0 ] || { echo "No archive to sign." >&2; exit 1; }
+          for archive in "${archives[@]}"; do
+            comment="envy-release $TAG $(basename "$archive")"
+            minisign -S -s "$key" -m "$archive" -t "$comment" < /dev/null
+            [ "$(minisign -V -P "$RELEASE_KEY" -m "$archive" -Q)" = "$comment" ]
+          done
+
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

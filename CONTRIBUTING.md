@@ -46,6 +46,8 @@ The `main` branch is tagged automatically from the commit message (`.github/work
 
 The tag action looks for `feat!:` and `feat:` **anywhere** in the messages of every commit pushed since the last tag, body included. Never write those strings in a commit body (not even quoted), or the push gets a bigger bump than intended.
 
+A release signs its archives with minisign: the repository secret `MINISIGN_SECRET_KEY` holds the secret key whose public half is `RELEASE_KEY` in `src/update/signature.rs` (and in `release.yml` and the install scripts). Without that secret the release job stops. Replacing the key means shipping a release, signed with the old key, that carries the new one.
+
 ## Architecture
 
 Commands depend on abstractions, never on the operating system directly (SOLID):
@@ -75,7 +77,7 @@ Commands depend on abstractions, never on the operating system directly (SOLID):
 | `state` | `StateStore` trait and the `.envy-state` file. |
 | `bundle` | `BundleCodec` trait and the AES-256-GCM implementation. |
 | `dotenv`, `inference` | Reading `.env` files and guessing types (`TypeInferrer` trait). |
-| `update` | Self-update: `ReleaseSource` (GitHub), version comparison, archive extraction and `SelfUpdater`. |
+| `update` | Self-update: `ReleaseSource` (GitHub), version comparison, the minisign signature of the archives (`signature.rs`), archive extraction and `SelfUpdater`. |
 | `prompt`, `runner` | `Prompter` and `ProcessRunner` traits and their real implementations. |
 
 To add a command: add its arguments to `cli.rs`, create `commands/<name>.rs`, register it in `commands/mod.rs` and `app.rs`, then add tests in `tests/`. Depend on the traits in `Context`; if you need something new from the OS, introduce a trait first.

@@ -4,7 +4,9 @@
 Cargo install, the prebuilt binary otherwise (falling back to it when `cargo install` fails). Values,
 manifests and `.envy-state` are never touched. `envy version` tells you when a newer release exists
 (`ENVY_NO_UPDATE_CHECK=1` turns that lookup off); both read
-`github.com/carvalinh0/envy/releases/latest` and trust your system's certificate store.
+`github.com/carvalinh0/envy/releases/latest` and trust your system's certificate store. Since the
+security fixes after 4.0, a prebuilt binary is only installed when its archive carries the release's
+minisign signature (see [SECURITY.md](../SECURITY.md)).
 
 What each major release asks of you is below. See [compatibility](compatibility.md) for what older
 releases do with data written by newer ones.

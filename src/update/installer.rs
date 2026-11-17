@@ -2,7 +2,8 @@
 //!
 //! The installation method is preserved: a binary that lives in Cargo's bin folder is updated
 //! with `cargo install`; any other copy is replaced with the prebuilt binary of the release.
-//! If `cargo install` fails the prebuilt binary is used instead.
+//! If `cargo install` fails the prebuilt binary is used instead. A prebuilt binary is only
+//! installed when its archive carries the minisign signature of the release key.
 
 use std::{
     fs,
@@ -11,7 +12,10 @@ use std::{
 
 use anyhow::{Context, Result, anyhow};
 
-use super::release::{ReleaseSource, asset_name, binary_name};
+use super::{
+    release::{ReleaseSource, asset_name, binary_name},
+    signature::{self, RELEASE_KEY, signature_name},
+};
 use crate::{runner::ProcessRunner, update::archive::extract_binary};
 
 const CRATE: &str = "dot-envy";
@@ -36,6 +40,8 @@ pub struct SystemUpdater<'a> {
     cargo_bin_dir: Option<PathBuf>,
     target: Option<&'static str>,
     runner: &'a dyn ProcessRunner,
+    /// The minisign public key the archives must be signed with.
+    release_key: String,
 }
 
 impl<'a> SystemUpdater<'a> {
@@ -50,7 +56,14 @@ impl<'a> SystemUpdater<'a> {
             cargo_bin_dir,
             target,
             runner,
+            release_key: RELEASE_KEY.to_string(),
         }
+    }
+
+    /// Trusts archives signed with `key` instead of [`RELEASE_KEY`] (tests, forks).
+    pub fn with_release_key(mut self, key: &str) -> Self {
+        self.release_key = key.to_string();
+        self
     }
 
     /// Describes the running executable, Cargo's bin folder and the platform.
@@ -85,6 +98,12 @@ impl<'a> SystemUpdater<'a> {
 
         let asset = asset_name(tag, target);
         let bytes = releases.download(tag, &asset)?;
+        let signature = releases
+            .download(tag, &signature_name(&asset))
+            .with_context(|| {
+                format!("The release {tag} has no signature for {asset}; nothing was installed.")
+            })?;
+        signature::verify(&self.release_key, &bytes, &signature, tag, &asset)?;
         let binary = extract_binary(&asset, &bytes, binary_name(target))?;
         replace_executable(&self.exe, &binary)
     }
@@ -170,7 +189,13 @@ mod tests {
     use std::{cell::RefCell, collections::HashMap};
 
     use super::*;
-    use crate::{schema::Secret, update::archive::tests::tar_gz};
+    use crate::{
+        schema::Secret,
+        update::{
+            archive::tests::tar_gz,
+            signature::{signature_name, tests::TestSigner, trusted_comment},
+        },
+    };
 
     #[derive(Default)]
     struct FakeReleases {
@@ -217,13 +242,62 @@ mod tests {
 
     const TARGET: &str = "x86_64-unknown-linux-gnu";
 
-    fn releases_with(binary: &[u8]) -> FakeReleases {
+    fn release_signer() -> TestSigner {
+        TestSigner::new(9)
+    }
+
+    /// A release whose archive is signed by `signer`.
+    fn signed_release(binary: &[u8], signer: &TestSigner) -> FakeReleases {
         let asset = asset_name("v1.0.0", TARGET);
         let archive = tar_gz(&[("envy-v1.0.0-x86_64-unknown-linux-gnu/envy", binary)]);
+        let signature = signer.sign(&archive, &trusted_comment("v1.0.0", &asset));
         FakeReleases {
-            assets: HashMap::from([(asset, archive)]),
+            assets: HashMap::from([(signature_name(&asset), signature), (asset, archive)]),
             ..Default::default()
         }
+    }
+
+    fn releases_with(binary: &[u8]) -> FakeReleases {
+        signed_release(binary, &release_signer())
+    }
+
+    /// An updater that trusts the test release key.
+    fn updater<'a>(
+        exe: PathBuf,
+        cargo: Option<PathBuf>,
+        runner: &'a FakeRunner,
+    ) -> SystemUpdater<'a> {
+        SystemUpdater::new(exe, cargo, Some(TARGET), runner)
+            .with_release_key(&release_signer().public_key())
+    }
+
+    #[test]
+    fn an_unsigned_release_is_not_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = installed(dir.path(), "envy");
+        let mut releases = releases_with(b"NEW");
+        releases
+            .assets
+            .retain(|name, _| !name.ends_with(".minisig"));
+        let runner = FakeRunner::new(Ok(0));
+        let err = updater(exe.clone(), None, &runner)
+            .apply("v1.0.0", &releases)
+            .unwrap_err();
+        assert!(err.to_string().contains("no signature"), "{err:#}");
+        assert_eq!(fs::read(&exe).unwrap(), b"OLD");
+    }
+
+    #[test]
+    fn a_release_signed_by_another_key_is_not_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = installed(dir.path(), "envy");
+        let releases = signed_release(b"NEW", &TestSigner::new(66));
+        let runner = FakeRunner::new(Ok(0));
+        let err = updater(exe.clone(), None, &runner)
+            .apply("v1.0.0", &releases)
+            .unwrap_err();
+        assert!(err.to_string().contains("not valid"), "{err:#}");
+        assert_eq!(fs::read(&exe).unwrap(), b"OLD");
     }
 
     fn installed(dir: &Path, name: &str) -> PathBuf {
@@ -263,7 +337,7 @@ mod tests {
         let exe = installed(dir.path(), "envy");
         let runner = FakeRunner::new(Ok(0));
         let releases = releases_with(b"NEW-BINARY");
-        let updater = SystemUpdater::new(exe.clone(), None, Some(TARGET), &runner);
+        let updater = updater(exe.clone(), None, &runner);
 
         let method = updater.apply("v1.0.0", &releases).unwrap();
 
@@ -272,7 +346,10 @@ mod tests {
         assert!(runner.calls.borrow().is_empty(), "cargo must not run");
         assert_eq!(
             *releases.downloads.borrow(),
-            vec!["envy-v1.0.0-x86_64-unknown-linux-gnu.tar.gz"]
+            vec![
+                "envy-v1.0.0-x86_64-unknown-linux-gnu.tar.gz",
+                "envy-v1.0.0-x86_64-unknown-linux-gnu.tar.gz.minisig"
+            ]
         );
     }
 
@@ -282,12 +359,7 @@ mod tests {
         let exe = installed(dir.path(), "envy");
         let runner = FakeRunner::new(Ok(0));
         let releases = releases_with(b"NEW");
-        let updater = SystemUpdater::new(
-            exe.clone(),
-            Some(dir.path().to_path_buf()),
-            Some(TARGET),
-            &runner,
-        );
+        let updater = updater(exe.clone(), Some(dir.path().to_path_buf()), &runner);
 
         let method = updater.apply("v1.2.3", &releases).unwrap();
 
@@ -310,12 +382,7 @@ mod tests {
             let exe = installed(dir.path(), "envy");
             let runner = FakeRunner::new(outcome);
             let releases = releases_with(b"NEW");
-            let updater = SystemUpdater::new(
-                exe.clone(),
-                Some(dir.path().to_path_buf()),
-                Some(TARGET),
-                &runner,
-            );
+            let updater = updater(exe.clone(), Some(dir.path().to_path_buf()), &runner);
 
             let method = updater.apply("v1.0.0", &releases).unwrap();
 
@@ -329,7 +396,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let exe = installed(dir.path(), "envy");
         let runner = FakeRunner::new(Ok(0));
-        let updater = SystemUpdater::new(exe.clone(), None, Some(TARGET), &runner);
+        let updater = updater(exe.clone(), None, &runner);
 
         let err = updater
             .apply("v1.0.0", &FakeReleases::default())
@@ -344,13 +411,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let exe = installed(dir.path(), "envy");
         let runner = FakeRunner::new(Ok(0));
+        let asset = asset_name("v1.0.0", TARGET);
+        let signature = release_signer().sign(b"garbage", &trusted_comment("v1.0.0", &asset));
         let releases = FakeReleases {
-            assets: HashMap::from([(asset_name("v1.0.0", TARGET), b"garbage".to_vec())]),
+            assets: HashMap::from([
+                (signature_name(&asset), signature),
+                (asset, b"garbage".to_vec()),
+            ]),
             ..Default::default()
         };
-        let updater = SystemUpdater::new(exe.clone(), None, Some(TARGET), &runner);
+        let updater = updater(exe.clone(), None, &runner);
 
-        assert!(updater.apply("v1.0.0", &releases).is_err());
+        let err = updater.apply("v1.0.0", &releases).unwrap_err();
+        assert!(err.to_string().contains("corrupted"), "{err:#}");
         assert_eq!(fs::read(&exe).unwrap(), b"OLD");
     }
 
