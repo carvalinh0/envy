@@ -129,7 +129,7 @@ pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn hkdf(salt: &[u8], ikm: &[u8], info: &[u8]) -> Key32 {
+pub(crate) fn hkdf(salt: &[u8], ikm: &[u8], info: &[u8]) -> Key32 {
     let mut out = Zeroizing::new([0u8; 32]);
     SimpleHkdf::<Sha3_256>::new(Some(salt), ikm)
         .expand(info, out.as_mut())

@@ -14,7 +14,7 @@ use dot_envy::{
     runner::SystemRunner,
     state::FileState,
     update::{GithubReleases, SystemUpdater},
-    vault::{EncryptedFileVault, KeyringVault},
+    vault::{EncryptedFileVault, SecretVault},
 };
 
 fn main() {
@@ -39,7 +39,7 @@ fn execute(cli: Cli) -> anyhow::Result<i32> {
         _ => config.discover(),
     };
     let forced = Backend::forced(cli.backend, std::env::var("ENVY_BACKEND").ok().as_deref())?;
-    let keyring = KeyringVault::default();
+    let keyring = keyring();
     let file = EncryptedFileVault::new(
         config.data_dir.clone(),
         &TerminalPrompter,
@@ -47,7 +47,7 @@ fn execute(cli: Cli) -> anyhow::Result<i32> {
     );
     let choices = FileBackends::new(config.data_dir.clone());
     let backends = Backends {
-        keyring: &keyring,
+        keyring: keyring.as_ref(),
         file: &file,
         choices: &choices,
         forced,
@@ -72,4 +72,15 @@ fn execute(cli: Cli) -> anyhow::Result<i32> {
     };
 
     app::dispatch(cli.command, &ctx, &mut std::io::stdout())
+}
+
+/// The OS keyring. A build without it (the server image) only offers the other backends.
+#[cfg(feature = "keyring")]
+fn keyring() -> Box<dyn SecretVault> {
+    Box::new(dot_envy::vault::KeyringVault::default())
+}
+
+#[cfg(not(feature = "keyring"))]
+fn keyring() -> Box<dyn SecretVault> {
+    Box::new(dot_envy::vault::UnavailableVault { backend: "keyring" })
 }

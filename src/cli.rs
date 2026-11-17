@@ -132,6 +132,9 @@ pub enum Commands {
 
     /// Manage the encrypted file vault of this project
     Vault(VaultArgs),
+
+    /// Run an Envy server (Linux builds with the `server` feature, or the Docker image)
+    Serve(ServeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -297,6 +300,37 @@ pub enum VaultAction {
     Recover,
     /// Replace the recovery key (the old one stops working)
     RecoveryKey,
+}
+
+#[derive(Debug, Args)]
+pub struct ServeArgs {
+    /// Folder of the database
+    #[arg(long, default_value = "envy-data")]
+    pub data: PathBuf,
+    /// Address to listen on
+    #[arg(long, default_value = "127.0.0.1:8443")]
+    pub listen: String,
+    /// TLS certificate (PEM); with --tls-key the server speaks https
+    #[arg(long, requires = "tls_key")]
+    pub tls_cert: Option<PathBuf>,
+    /// TLS private key (PEM)
+    #[arg(long, requires = "tls_cert")]
+    pub tls_key: Option<PathBuf>,
+    /// Plain HTTP on any address, for a TLS proxy in front (client addresses from X-Forwarded-For)
+    #[arg(long)]
+    pub behind_proxy: bool,
+    /// Hours a login lasts
+    #[arg(long, default_value_t = 12)]
+    pub session_ttl: u32,
+    /// Prepare an empty data folder and print the root token once
+    #[arg(long)]
+    pub init: bool,
+    /// With --init: write the root token to this file instead of printing it
+    #[arg(long, requires = "init")]
+    pub init_output: Option<PathBuf>,
+    /// Print a new root token for an existing server (to add an admin) and exit
+    #[arg(long, conflicts_with = "init")]
+    pub new_root_token: bool,
 }
 
 #[cfg(test)]

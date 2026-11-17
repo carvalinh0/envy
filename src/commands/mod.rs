@@ -16,6 +16,7 @@ pub mod rename;
 pub mod rollback;
 pub mod run;
 pub mod schema;
+pub mod serve;
 pub mod set;
 pub mod switch;
 pub mod unprotect;

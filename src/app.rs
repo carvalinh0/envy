@@ -32,6 +32,7 @@ pub fn dispatch(command: Commands, ctx: &Context, out: &mut dyn Write) -> Result
         Commands::Unprotect(args) => commands::unprotect::run(ctx, &args, out)?,
         Commands::Migrate(args) => commands::migrate::run(ctx, &args, out)?,
         Commands::Vault(args) => commands::vault::run(ctx, &args, out)?,
+        Commands::Serve(args) => commands::serve::run(&args, out)?,
     }
     Ok(0)
 }
