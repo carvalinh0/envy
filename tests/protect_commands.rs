@@ -168,6 +168,15 @@ fn unprotect_decrypts_and_removes_the_password() {
 }
 
 #[test]
+fn a_renamed_protected_value_stays_readable() {
+    let h = with_password(protected(), PASSWORD);
+    h.ok(&["rename", "API_TOKEN", "TOKEN", "--in", "prod"]);
+    assert!(is_sealed(&raw(&h, "prod", "TOKEN").unwrap()));
+    h.ok(&["run", "prod", "--", "node"]);
+    assert_eq!(h.runner.calls.borrow()[0].envs["TOKEN"], TOKEN);
+}
+
+#[test]
 fn a_new_id_keeps_protected_values_readable() {
     let h = with_password(protected(), PASSWORD);
     h.ok(&["up", "--new-id"]);

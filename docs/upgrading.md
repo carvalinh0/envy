@@ -22,6 +22,11 @@ releases do with data written by newer ones.
   command. A script that calls `envy` again inside `envy run` must receive them another way.
 - Invalid values are reported without the parser's detail (which could quote the value).
 - `envy import <file>` without the key asks for it without echo.
+- New values of protected environments are bound to their environment and variable
+  (`envy:sealed:v2:`). 4.0 can't read them; values 4.0 wrote keep opening. `envy rename` in a protected
+  environment asks for the password.
+- A manifest where two variables would share a keyring entry (names with `/`) is refused until one
+  is renamed.
 
 **Server:** the image no longer adds `--behind-proxy` by default. A container started without
 arguments now refuses to start; pass `--behind-proxy` (with a TLS proxy in front) or `--tls-cert` and

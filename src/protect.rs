@@ -1,8 +1,10 @@
 //! Password-protected environments.
 //!
-//! A value of a protected environment is stored as `envy:sealed:v1:` followed by
+//! A value of a protected environment is stored as `envy:sealed:v2:` followed by
 //! base64(salt | nonce | ciphertext): the key is Argon2id(password, salt) and the cipher
-//! AES-256-GCM. Every value carries its salt, so reading needs only the password. The
+//! AES-256-GCM, with the environment and the variable as associated data, so a value moved to
+//! another variable or environment does not open. Values of 4.0 and before (`envy:sealed:v1:`)
+//! are bound to nothing and still open. Every value carries its salt, so reading needs only the password. The
 //! password check is a sealed constant kept in the environment's reserved slot, the empty
 //! variable name that no manifest can declare; new values reuse its salt, so a single key
 //! derivation unlocks the whole environment.
@@ -26,6 +28,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     envy::Envy,
+    keys::encode,
     prompt::Prompter,
     schema::Secret,
     vault::{Change, SecretVault, Version},
@@ -33,8 +36,9 @@ use crate::{
 
 /// Reserved variable name holding the password check of an environment.
 pub const CHECK_SLOT: &str = "";
-const PREFIX: &str = "envy:sealed:v1:";
-const AAD: &[u8] = b"envy-sealed-v1";
+const PREFIX: &str = "envy:sealed:v2:";
+const LEGACY_PREFIX: &str = "envy:sealed:v1:";
+const LEGACY_AAD: &[u8] = b"envy-sealed-v1";
 const CHECK_TEXT: &str = "envy protected environment";
 const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 12;
@@ -43,7 +47,8 @@ type Salt = [u8; SALT_LEN];
 type DerivedKey = Zeroizing<[u8; 32]>;
 
 pub fn is_sealed(value: &Secret) -> bool {
-    value.expose_secret().starts_with(PREFIX)
+    let text = value.expose_secret();
+    text.starts_with(PREFIX) || text.starts_with(LEGACY_PREFIX)
 }
 
 /// Variables of `environment` whose values are stored for the project without encryption,
@@ -73,14 +78,23 @@ fn cipher(key: &DerivedKey) -> Aes256Gcm {
     Aes256Gcm::new(&Key::<Aes256Gcm>::from(**key))
 }
 
-fn seal(key: &DerivedKey, salt: &Salt, value: &Secret) -> Result<Secret> {
+/// The associated data of a value sealed at `(environment, variable)`.
+fn aad(environment: &str, variable: &str) -> Vec<u8> {
+    encode(&[
+        b"envy-sealed-v2",
+        environment.as_bytes(),
+        variable.as_bytes(),
+    ])
+}
+
+fn seal(key: &DerivedKey, salt: &Salt, value: &Secret, aad: &[u8]) -> Result<Secret> {
     let nonce = Nonce::generate();
     let ciphertext = cipher(key)
         .encrypt(
             &nonce,
             Payload {
                 msg: value.expose_secret().as_bytes(),
-                aad: AAD,
+                aad,
             },
         )
         .map_err(|_| anyhow!("Could not encrypt the value"))?;
@@ -95,17 +109,23 @@ fn seal(key: &DerivedKey, salt: &Salt, value: &Secret) -> Result<Secret> {
 }
 
 /// The salt of a sealed value and the rest of its payload.
-fn split(value: &Secret) -> Option<(Salt, Vec<u8>)> {
-    let encoded = value.expose_secret().strip_prefix(PREFIX)?;
+/// A sealed value's salt, the rest of its payload and the associated data it was sealed with,
+/// for a value stored at `(environment, variable)`.
+fn split(value: &Secret, environment: &str, variable: &str) -> Option<(Salt, Vec<u8>, Vec<u8>)> {
+    let text = value.expose_secret();
+    let (encoded, aad) = match text.strip_prefix(PREFIX) {
+        Some(encoded) => (encoded, aad(environment, variable)),
+        None => (text.strip_prefix(LEGACY_PREFIX)?, LEGACY_AAD.to_vec()),
+    };
     let payload = STANDARD.decode(encoded).ok()?;
     if payload.len() < SALT_LEN + NONCE_LEN {
         return None;
     }
     let salt = payload[..SALT_LEN].try_into().ok()?;
-    Some((salt, payload[SALT_LEN..].to_vec()))
+    Some((salt, payload[SALT_LEN..].to_vec(), aad))
 }
 
-fn open_with(key: &DerivedKey, sealed: &[u8]) -> Option<Secret> {
+fn open_with(key: &DerivedKey, sealed: &[u8], aad: &[u8]) -> Option<Secret> {
     let (nonce, ciphertext) = sealed.split_at(NONCE_LEN);
     let nonce = Nonce::try_from(nonce).ok()?;
     let plaintext = Zeroizing::new(
@@ -114,7 +134,7 @@ fn open_with(key: &DerivedKey, sealed: &[u8]) -> Option<Secret> {
                 &nonce,
                 Payload {
                     msg: ciphertext,
-                    aad: AAD,
+                    aad,
                 },
             )
             .ok()?,
@@ -222,12 +242,15 @@ impl<'a> ProtectedVault<'a> {
     /// environment's password check, or creates the check when the environment has none.
     fn unlock_for_writing(&self, environment: &str) -> Result<(DerivedKey, Salt)> {
         let check = self.inner.get(&self.project, environment, CHECK_SLOT)?;
-        let Some((salt, sealed)) = check.as_ref().and_then(split) else {
+        let Some((salt, sealed, aad)) = check
+            .as_ref()
+            .and_then(|check| split(check, environment, CHECK_SLOT))
+        else {
             return self.create_check(environment);
         };
         let password = self.unlocker.password(environment)?;
         let key = self.unlocker.key(&password, &salt)?;
-        match open_with(&key, &sealed) {
+        match open_with(&key, &sealed, &aad) {
             Some(text) if text.expose_secret() == CHECK_TEXT => Ok((key, salt)),
             _ => bail!("Wrong password for the protected environment '{environment}'."),
         }
@@ -237,7 +260,12 @@ impl<'a> ProtectedVault<'a> {
         let password = self.unlocker.new_password(environment)?;
         let salt = Salt::generate();
         let key = self.unlocker.key(&password, &salt)?;
-        let check = seal(&key, &salt, &Secret::new(CHECK_TEXT))?;
+        let check = seal(
+            &key,
+            &salt,
+            &Secret::new(CHECK_TEXT),
+            &aad(environment, CHECK_SLOT),
+        )?;
         // The check keeps no versions, so its date is never shown.
         let change = Change {
             at: chrono::DateTime::UNIX_EPOCH,
@@ -252,15 +280,38 @@ impl<'a> ProtectedVault<'a> {
         if !self.reveal || !is_sealed(&value) {
             return Ok(value);
         }
+        self.decrypt(environment, key_name, &value)
+            .map(|(plain, _, _)| plain)
+    }
+
+    /// The value and the key and salt that opened it.
+    fn decrypt(
+        &self,
+        environment: &str,
+        key_name: &str,
+        value: &Secret,
+    ) -> Result<(Secret, DerivedKey, Salt)> {
         let failure = || {
             anyhow!(
                 "Could not decrypt '{key_name}' in '{environment}': wrong password or corrupted value."
             )
         };
-        let (salt, sealed) = split(&value).ok_or_else(failure)?;
+        let (salt, sealed, aad) = split(value, environment, key_name).ok_or_else(failure)?;
         let password = self.unlocker.password(environment)?;
         let key = self.unlocker.key(&password, &salt)?;
-        open_with(&key, &sealed).ok_or_else(failure)
+        let plain = open_with(&key, &sealed, &aad).ok_or_else(failure)?;
+        Ok((plain, key, salt))
+    }
+
+    /// A stored value moving from variable `from` to `to` (`envy rename`). A value sealed
+    /// since v2 is bound to its variable, so it is sealed again for the new one; others move
+    /// as they are.
+    pub fn rebind(&self, environment: &str, from: &str, to: &str, value: Secret) -> Result<Secret> {
+        if !value.expose_secret().starts_with(PREFIX) {
+            return Ok(value);
+        }
+        let (plain, key, salt) = self.decrypt(environment, from, &value)?;
+        seal(&key, &salt, &plain, &aad(environment, to))
     }
 }
 
@@ -284,7 +335,7 @@ impl SecretVault for ProtectedVault<'_> {
             return self.inner.set(project, environment, key, value, change);
         }
         let (derived, salt) = self.unlock_for_writing(environment)?;
-        let sealed = seal(&derived, &salt, value)?;
+        let sealed = seal(&derived, &salt, value, &aad(environment, key))?;
         self.inner.set(project, environment, key, &sealed, change)
     }
 
@@ -464,6 +515,81 @@ mod tests {
                 .unwrap()
                 .expose_secret(),
             "80"
+        );
+    }
+
+    #[test]
+    fn a_sealed_value_only_opens_where_it_was_stored() {
+        let inner = MemoryVault::new();
+        let mut envy = protected_envy();
+        envy.schemas.insert("staging".into(), Default::default());
+        envy.protected.insert("staging".into());
+        let setup = Answers(RefCell::new(vec!["pw", "pw"]));
+        let vault = ProtectedVault::new(&inner, &envy, &setup, Some(&PW), true);
+        vault
+            .set("p", "prod", "TOKEN", &Secret::new("s3cr3t"), change())
+            .unwrap();
+        vault
+            .set("p", "staging", "TOKEN", &Secret::new("other"), change())
+            .unwrap();
+        let stored = inner.get("p", "prod", "TOKEN").unwrap().unwrap();
+        inner.set("p", "prod", "OTHER", &stored, change()).unwrap();
+        inner
+            .set("p", "staging", "TOKEN", &stored, change())
+            .unwrap();
+
+        let err = vault.get("p", "prod", "OTHER").unwrap_err().to_string();
+        assert!(err.contains("Could not decrypt 'OTHER'"), "{err}");
+        assert!(vault.get("p", "staging", "TOKEN").is_err());
+    }
+
+    /// A value as 4.0 sealed it: no binding to where it is stored.
+    fn sealed_by_4_0(password: &Secret, text: &str) -> Secret {
+        let salt = Salt::generate();
+        let key = derive(password, &salt).unwrap();
+        let nonce = Nonce::generate();
+        let ciphertext = cipher(&key)
+            .encrypt(
+                &nonce,
+                Payload {
+                    msg: text.as_bytes(),
+                    aad: b"envy-sealed-v1",
+                },
+            )
+            .unwrap();
+        let payload = [salt.as_slice(), nonce.as_slice(), &ciphertext].concat();
+        Secret::new(format!("envy:sealed:v1:{}", STANDARD.encode(payload)))
+    }
+
+    static PW: std::sync::LazyLock<Secret> = std::sync::LazyLock::new(|| Secret::new("pw"));
+
+    #[test]
+    fn values_and_checks_sealed_by_4_0_still_open() {
+        let inner = MemoryVault::new();
+        let envy = protected_envy();
+        let check = sealed_by_4_0(&PW, CHECK_TEXT);
+        inner
+            .set("p", "prod", CHECK_SLOT, &check, change())
+            .unwrap();
+        let old = sealed_by_4_0(&PW, "old-s3cr3t");
+        inner.set("p", "prod", "TOKEN", &old, change()).unwrap();
+
+        let no_answers = Answers::default();
+        let vault = ProtectedVault::new(&inner, &envy, &no_answers, Some(&PW), true);
+        let value = vault.get("p", "prod", "TOKEN").unwrap().unwrap();
+        assert_eq!(value.expose_secret(), "old-s3cr3t");
+        vault
+            .set("p", "prod", "NEW", &Secret::new("new"), change())
+            .unwrap();
+        let value = vault.get("p", "prod", "NEW").unwrap().unwrap();
+        assert_eq!(value.expose_secret(), "new");
+
+        let wrong = Secret::new("nope");
+        let reader = ProtectedVault::new(&inner, &envy, &no_answers, Some(&wrong), true);
+        assert!(
+            reader
+                .set("p", "prod", "X", &Secret::new("x"), change())
+                .is_err()
         );
     }
 

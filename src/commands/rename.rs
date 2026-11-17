@@ -16,9 +16,12 @@ pub fn run(ctx: &Context, args: &RenameArgs, out: &mut dyn Write) -> Result<()> 
 
     envy.rename_variable(&environment, &args.old_name, &args.new_name)?;
 
-    // The stored value moves as it is (sealed values included); its history stays behind
-    // with the old name and is removed with it.
+    // The stored value moves (a sealed one is sealed again for its new name); its history
+    // stays behind with the old name and is removed with it.
     if let Some(value) = ctx.vault.get(&envy.id, &environment, &args.old_name)? {
+        let value =
+            ctx.secrets(&envy)
+                .rebind(&environment, &args.old_name, &args.new_name, value)?;
         ctx.vault.set(
             &envy.id,
             &environment,

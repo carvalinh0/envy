@@ -118,7 +118,8 @@ Removes the variable from the manifest and its value and versions from the vault
 ### `envy rename <old> <new>`
 
 Renames the variable in the manifest and moves its value. Its history stays with the old name and
-is removed.
+is removed. In a protected environment the value is encrypted again for its new name, which asks for
+the password.
 
 | Option | What it does |
 | :-- | :-- |

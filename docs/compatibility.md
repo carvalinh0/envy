@@ -47,7 +47,7 @@ the limits below.
 | :-- | :-- | :-- |
 | `envy.json` | 1.0 (`schemas/v1.json`) | ignores keys it does not know (`history`, `protected`, `rotate` from 3.0; `server` from 4.0) and **drops them** if it rewrites the manifest. A manifest without them keeps its checksum. |
 | Keyring values | 1.0: service `envy`, `{project id}/{environment}/{variable}` | reads and writes the active values; it does not see the versions (service `envy-history`, 3.0) and does not record new ones. |
-| Values of protected environments | 3.0 | reads the encrypted text as if it were the value, so it passes garbage to `envy run`. Update every machine before protecting an environment. |
+| Values of protected environments | 3.0; bound to their variable since the security fixes after 4.0 (`envy:sealed:v2:`) | reads the encrypted text as if it were the value, so it passes garbage to `envy run`. Update every machine before protecting an environment; values written by a newer release are not readable by 4.0, but the newer release reads the ones 4.0 wrote. |
 | Bundles (`.envy`) | 1.0 (`envy-bundle-v1`) | imports them, ignoring `--ttl` (3.0). |
 | `.envy-state` | 1.0 | reads it unchanged. |
 | File vaults | 3.0 (format v1, [ADR 0001](adr/0001-vault-record-format.md)) | before 3.0, has no file backend. |
