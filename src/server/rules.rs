@@ -18,7 +18,7 @@ use crate::{
     identity::PublicKeys,
     keys,
     remote::protocol::{
-        ALL_ENVIRONMENTS, Access, ApiError, AuditEntry, Commit, Done, HeadEntry, Invite,
+        ALL_ENVIRONMENTS, Access, ApiError, AuditEntry, Commit, Done, HeadEntry, Invite, MAX_BODY,
         MemberKeys, MemberStatus, MemberView, NewProject, Nonce, ProjectView, RECOVERY, Removed,
         Request, ServerInfo, SessionToken, SignedHead, SignedRecovery, SignedWrap, grant_message,
         head_message, record_message, recovery_message, session_message, verify, wrap_message,
@@ -210,10 +210,17 @@ impl ServerCore {
     }
 
     /// A request in JSON, as it arrives over HTTP. Returns the status and the JSON body.
+    /// The size is checked here, not only by the HTTP layer, because this is the boundary
+    /// where untrusted bytes are parsed: a caller that skips the HTTP limit must not get
+    /// an unbounded allocation from `Request`'s vectors.
     pub fn handle_json(&self, client: &str, token: Option<&str>, body: &[u8]) -> (u16, Vec<u8>) {
-        let result = serde_json::from_slice::<Request>(body)
-            .map_err(|_| bad_request("The request is not valid."))
-            .and_then(|request| self.handle(client, token, request));
+        let result = if body.len() > MAX_BODY {
+            Err(ApiError::new(413, "too_large", "The request is too large."))
+        } else {
+            serde_json::from_slice::<Request>(body)
+                .map_err(|_| bad_request("The request is not valid."))
+                .and_then(|request| self.handle(client, token, request))
+        };
         let (status, value) = match result {
             Ok(value) => (200, value),
             Err(err) => (err.status, serde_json::to_value(&err).unwrap_or_default()),
@@ -1296,6 +1303,14 @@ mod tests {
             .is_ok(),
             "expired challenges make room"
         );
+    }
+
+    #[test]
+    fn oversized_bodies_are_refused_before_parsing() {
+        let f = fixture();
+        let body = vec![b' '; MAX_BODY + 1];
+        let (status, _) = f.core.handle_json("client", None, &body);
+        assert_eq!(status, 413);
     }
 
     #[test]
